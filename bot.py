@@ -20,7 +20,6 @@ async def load_cogs():
 async def on_ready():
     print(f"Bot logged in as {bot.user}")
 
-    # Sync slash commands
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} commands")
@@ -33,7 +32,3 @@ async def main():
         await bot.start(os.getenv("TOKEN"))
 
 asyncio.run(main())
-
-TOKEN = os.getenv("TOKEN")
-
-bot.run(TOKEN)
