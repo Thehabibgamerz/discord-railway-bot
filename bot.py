@@ -1,28 +1,38 @@
 import discord
 from discord.ext import commands
-from discord import app_commands
 import os
+import asyncio
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Runs when bot starts
+# Load all cogs automatically
+async def load_cogs():
+    for file in os.listdir("./cogs"):
+        if file.endswith(".py"):
+            await bot.load_extension(f"cogs.{file[:-3]}")
+            print(f"Loaded cog: {file}")
+
 @bot.event
 async def on_ready():
-    await bot.tree.sync()  # sync slash commands
-    print(f"Logged in as {bot.user}")
+    print(f"Bot logged in as {bot.user}")
 
-# Slash command: /ping
-@bot.tree.command(name="ping", description="Check bot latency")
-async def ping(interaction: discord.Interaction):
-    await interaction.response.send_message("🏓 Pong!")
+    # Sync slash commands
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} commands")
+    except Exception as e:
+        print(e)
 
-# Slash command: /hello
-@bot.tree.command(name="hello", description="Say hello")
-async def hello(interaction: discord.Interaction):
-    await interaction.response.send_message(f"Hello {interaction.user.mention}! 👋")
+async def main():
+    async with bot:
+        await load_cogs()
+        await bot.start(os.getenv("TOKEN"))
+
+asyncio.run(main())
 
 TOKEN = os.getenv("TOKEN")
 
