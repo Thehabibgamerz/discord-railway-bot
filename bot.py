@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
 import os
 
 intents = discord.Intents.default()
@@ -7,17 +8,21 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# Runs when bot starts
 @bot.event
 async def on_ready():
-    print(f"Bot is online as {bot.user}")
+    await bot.tree.sync()  # sync slash commands
+    print(f"Logged in as {bot.user}")
 
-@bot.command()
-async def ping(ctx):
-    await ctx.send("Pong! 🏓")
+# Slash command: /ping
+@bot.tree.command(name="ping", description="Check bot latency")
+async def ping(interaction: discord.Interaction):
+    await interaction.response.send_message("🏓 Pong!")
 
-@bot.command()
-async def hello(ctx):
-    await ctx.send(f"Hello {ctx.author.mention} 👋")
+# Slash command: /hello
+@bot.tree.command(name="hello", description="Say hello")
+async def hello(interaction: discord.Interaction):
+    await interaction.response.send_message(f"Hello {interaction.user.mention}! 👋")
 
 TOKEN = os.getenv("TOKEN")
 
