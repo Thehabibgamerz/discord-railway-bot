@@ -6,6 +6,8 @@ import json
 TICKET_CATEGORY_ID = 1389838715647692900
 LOG_CHANNEL_ID = 1389842003906265098
 
+STAFF_ROLE = 1389824693388837035
+
 GENERAL_ROLE = 1389824693388837035
 RECRUIT_ROLE = 1432616013257773227
 EXEC_ROLE = 1389824452778262589
@@ -14,6 +16,7 @@ ROUTE_ROLE = 1432615814921453649
 
 
 def get_ticket_number():
+
     try:
         with open("ticket_count.json") as f:
             data = json.load(f)
@@ -85,11 +88,15 @@ class TicketDropdown(discord.ui.Select):
 
         embed = discord.Embed(
             title=f"🎫 Ticket #{number}",
-            description=f"{user.mention} opened **{self.values[0]}** ticket.",
             color=discord.Color.green()
         )
 
-        embed.add_field(name="Status", value="Open")
+        embed.add_field(name="Opened By", value=user.mention)
+        embed.add_field(name="Category", value=self.values[0])
+        embed.add_field(name="Status", value="🟢 Open")
+        embed.add_field(name="Claimed By", value="No one yet", inline=False)
+
+        embed.set_footer(text="Akasa Air Virtual Support System")
 
         await channel.send(
             content=role_ping.mention,
@@ -98,7 +105,7 @@ class TicketDropdown(discord.ui.Select):
         )
 
         await interaction.response.send_message(
-            f"Ticket created: {channel.mention}",
+            f"✅ Ticket created: {channel.mention}",
             ephemeral=True
         )
 
@@ -118,22 +125,42 @@ class TicketButtons(discord.ui.View):
     @discord.ui.button(label="Claim", emoji="👨‍✈️", style=discord.ButtonStyle.success)
     async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        await interaction.response.send_message(
-            f"Ticket claimed by {interaction.user.mention}"
+        staff_role = interaction.guild.get_role(STAFF_ROLE)
+
+        if staff_role not in interaction.user.roles:
+            return await interaction.response.send_message(
+                "Only staff can claim tickets.",
+                ephemeral=True
+            )
+
+        embed = discord.Embed(
+            description=f"👨‍✈️ Ticket claimed by {interaction.user.mention}",
+            color=discord.Color.blue()
         )
 
-    @discord.ui.button(label="Lock", emoji="🔒", style=discord.ButtonStyle.secondary)
-    async def lock(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(embed=embed)
 
-        await interaction.channel.set_permissions(
-            interaction.guild.default_role,
-            send_messages=False
-        )
-
-        await interaction.response.send_message("Ticket locked.")
-
-    @discord.ui.button(label="Close", emoji="❌", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Close Ticket", emoji="🔒", style=discord.ButtonStyle.danger)
     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        embed = discord.Embed(
+            description="🔒 Ticket closed.\nStaff can now delete it.",
+            color=discord.Color.red()
+        )
+
+        await interaction.response.send_message(
+            embed=embed,
+            view=DeleteButton()
+        )
+
+
+class DeleteButton(discord.ui.View):
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Delete Ticket", emoji="🗑️", style=discord.ButtonStyle.danger)
+    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         log_channel = interaction.guild.get_channel(LOG_CHANNEL_ID)
 
@@ -144,8 +171,8 @@ class TicketButtons(discord.ui.View):
         transcript = "\n".join(messages)
 
         embed = discord.Embed(
-            title="Ticket Closed",
-            description=f"Closed by {interaction.user.mention}",
+            title="Ticket Deleted",
+            description=f"Deleted by {interaction.user.mention}",
             color=discord.Color.red()
         )
 
@@ -153,22 +180,7 @@ class TicketButtons(discord.ui.View):
             await log_channel.send(embed=embed)
             await log_channel.send(f"```\n{transcript}\n```")
 
-        await interaction.channel.set_permissions(
-            interaction.guild.default_role,
-            view_channel=False
-        )
-
-        await interaction.response.send_message("Ticket closed.")
-
-    @discord.ui.button(label="Reopen", emoji="🔓", style=discord.ButtonStyle.primary)
-    async def reopen(self, interaction: discord.Interaction, button: discord.ui.Button):
-
-        await interaction.channel.set_permissions(
-            interaction.guild.default_role,
-            view_channel=True
-        )
-
-        await interaction.response.send_message("Ticket reopened.")
+        await interaction.channel.delete()
 
 
 class Tickets(commands.Cog):
@@ -187,21 +199,27 @@ class Tickets(commands.Cog):
         embed = discord.Embed(
             title="✈️ Akasa Air Virtual Support Center",
             description="""
-Need assistance with any **Akasa Air service**?
+Need assistance with **Akasa Air services**?
 
-Select a category below to open a support ticket.
+Our support team is ready to help you.
 
-• General Support  
-• Recruitments  
-• Executive Team Support  
-• PIREP Support  
-• Route Support
+Select a category below to create a support ticket.
+
+🎫 General Support  
+🧑‍✈️ Recruitments  
+👔 Executive Team Support  
+📊 PIREP Support  
+🗺️ Route Support
+
+Our team will assist you shortly.
 """,
             color=discord.Color.orange()
         )
 
         if image:
             embed.set_image(url=image)
+
+        embed.set_footer(text="Akasa Air Support System")
 
         await channel.send(embed=embed, view=TicketPanel())
 
@@ -229,7 +247,7 @@ Select a category below to open a support ticket.
         await interaction.channel.set_permissions(user, overwrite=None)
 
         await interaction.response.send_message(
-            f"{user.mention} removed from ticket."
+            f"{user.mention} removed from the ticket."
         )
 
 
