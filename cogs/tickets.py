@@ -44,7 +44,7 @@ class TicketDropdown(discord.ui.Select):
         ]
 
         super().__init__(
-            placeholder="Select ticket category",
+            placeholder="Select a ticket category",
             options=options
         )
 
@@ -94,7 +94,7 @@ class TicketDropdown(discord.ui.Select):
         embed.add_field(name="Opened By", value=user.mention)
         embed.add_field(name="Category", value=self.values[0])
         embed.add_field(name="Status", value="🟢 Open")
-        embed.add_field(name="Claimed By", value="No one yet", inline=False)
+        embed.add_field(name="Claimed By", value="Not claimed yet", inline=False)
 
         embed.set_footer(text="Akasa Air Virtual Support System")
 
@@ -133,12 +133,9 @@ class TicketButtons(discord.ui.View):
                 ephemeral=True
             )
 
-        embed = discord.Embed(
-            description=f"👨‍✈️ Ticket claimed by {interaction.user.mention}",
-            color=discord.Color.blue()
+        await interaction.response.send_message(
+            f"👨‍✈️ Ticket claimed by {interaction.user.mention}"
         )
-
-        await interaction.response.send_message(embed=embed)
 
     @discord.ui.button(label="Close Ticket", emoji="🔒", style=discord.ButtonStyle.danger)
     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -183,35 +180,60 @@ class DeleteButton(discord.ui.View):
         await interaction.channel.delete()
 
 
+class StaffPanel(discord.ui.View):
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Claim", style=discord.ButtonStyle.success, emoji="👨‍✈️")
+    async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        await interaction.response.defer()
+
+        await interaction.followup.send(
+            f"Ticket claimed by {interaction.user.mention}"
+        )
+
+    @discord.ui.button(label="Close", style=discord.ButtonStyle.secondary, emoji="🔒")
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        await interaction.response.defer()
+
+        embed = discord.Embed(
+            description="🔒 Ticket closed.",
+            color=discord.Color.red()
+        )
+
+        await interaction.followup.send(embed=embed)
+
+    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        await interaction.response.send_message("Deleting ticket...")
+
+        await interaction.channel.delete()
+
+
 class Tickets(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
 
     @app_commands.command(name="ticketpanel", description="Create ticket panel")
-    async def ticketpanel(
-        self,
-        interaction: discord.Interaction,
-        channel: discord.TextChannel,
-        image: str = None
-    ):
+    async def ticketpanel(self, interaction: discord.Interaction, channel: discord.TextChannel, image: str = None):
 
         embed = discord.Embed(
             title="✈️ Akasa Air Virtual Support Center",
             description="""
 Need assistance with **Akasa Air services**?
 
-Our support team is ready to help you.
-
-Select a category below to create a support ticket.
+Select a category below to open a ticket.
 
 🎫 General Support  
 🧑‍✈️ Recruitments  
 👔 Executive Team Support  
 📊 PIREP Support  
 🗺️ Route Support
-
-Our team will assist you shortly.
 """,
             color=discord.Color.orange()
         )
@@ -226,6 +248,39 @@ Our team will assist you shortly.
         await interaction.response.send_message(
             f"Ticket panel created in {channel.mention}",
             ephemeral=True
+        )
+
+    @app_commands.command(name="tickets", description="Open staff ticket dashboard")
+    async def tickets(self, interaction: discord.Interaction):
+
+        staff_role = interaction.guild.get_role(STAFF_ROLE)
+
+        if staff_role not in interaction.user.roles:
+            return await interaction.response.send_message(
+                "Only staff can use this command.",
+                ephemeral=True
+            )
+
+        embed = discord.Embed(
+            title="🎛️ Ticket Staff Dashboard",
+            description="""
+Manage this ticket using the buttons below.
+
+👨‍✈️ Claim  
+🔒 Close  
+🗑️ Delete
+""",
+            color=discord.Color.blue()
+        )
+
+        embed.add_field(
+            name="Ticket Channel",
+            value=interaction.channel.mention
+        )
+
+        await interaction.response.send_message(
+            embed=embed,
+            view=StaffPanel()
         )
 
     @app_commands.command(name="adduser", description="Add user to ticket")
