@@ -5,7 +5,7 @@ from discord.ui import View, Button
 from datetime import datetime, timezone
 import asyncio
 
-# Function to create a visual emoji countdown bar
+# Function to create visual emoji countdown bar
 def countdown_bar(total_seconds, remaining_seconds, length=10):
     filled = int(length * (total_seconds - remaining_seconds) / total_seconds)
     empty = length - filled
@@ -68,10 +68,10 @@ class Event(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="createevent", description="Create a Sesh style event with countdown bar")
+    @app_commands.command(name="createevent", description="Create a PRO Sesh-style event")
     @app_commands.describe(
         title="Event title",
-        datetime="Event time in YYYY-MM-DD HH:MM or DD/MM/YYYY HH:MM (24h)",
+        datetime="Event time (e.g., YYYY-MM-DD HH:MM, DD/MM/YYYY HH:MM, or add AM/PM)",
         description="Event description",
         channel="Channel to post event",
         max_attendees="Maximum attendees",
@@ -91,20 +91,23 @@ class Event(commands.Cog):
         on_start_mentions: discord.Role = None,
         image: str = None
     ):
-        # Parse datetime (flexible)
+        # Try multiple datetime formats
         dt = None
-        for fmt in ("%Y-%m-%d %H:%M", "%d/%m/%Y %H:%M"):
+        formats = ["%Y-%m-%d %H:%M", "%d/%m/%Y %H:%M", "%Y-%m-%d %I:%M %p", "%d/%m/%Y %I:%M %p"]
+        for fmt in formats:
             try:
-                dt = datetime.strptime(datetime, fmt)
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = datetime.strptime(datetime.strip(), fmt).replace(tzinfo=timezone.utc)
                 break
             except:
                 continue
         if dt is None:
-            await interaction.response.send_message("Invalid datetime. Use `YYYY-MM-DD HH:MM` or `DD/MM/YYYY HH:MM`.", ephemeral=True)
+            await interaction.response.send_message(
+                "Invalid datetime! Use one of:\n`YYYY-MM-DD HH:MM` or `DD/MM/YYYY HH:MM` or with AM/PM",
+                ephemeral=True
+            )
             return
 
-        # Create embed
+        # Embed
         embed = discord.Embed(
             title=f"🎉 {title}",
             description=description,
@@ -117,6 +120,7 @@ class Event(commands.Cog):
         )
         embed.add_field(name=f"Attending (0/{max_attendees})", value="No attendees yet", inline=False)
         embed.add_field(name="Host", value=interaction.user.mention, inline=False)
+
         if image:
             embed.set_image(url=image)
 
@@ -128,7 +132,7 @@ class Event(commands.Cog):
         await msg.edit(view=view)
         await interaction.response.send_message(f"Event created in {channel.mention}", ephemeral=True)
 
-        # Real-time countdown loop
+        # Real-time countdown
         while True:
             now_ts = int(datetime.now(timezone.utc).timestamp())
             if now_ts >= int(dt.timestamp()):
@@ -136,7 +140,7 @@ class Event(commands.Cog):
             await view.update_embed()
             await asyncio.sleep(30)  # update every 30 seconds
 
-        # Lock attendance and announce start
+        # Lock and announce start
         view.locked = True
         start_embed = discord.Embed(
             title=f"🚀 {title} Started!",
