@@ -8,49 +8,32 @@ class Status(commands.Cog):
 
     @app_commands.command(
         name="status",
-        description="Set the bot's activity (Playing, Watching, Listening, Competing)"
+        description="Set the bot's status (Playing, Watching, Listening, Competing)"
     )
     @app_commands.describe(
-        message="The status message to show",
+        activity="Type of activity", 
+        text="Text to display in the status"
     )
-    async def status(self, interaction: discord.Interaction, message: str):
-        """Slash command to set the bot status"""
-        # Step 1: Create dropdown for activity type
-        class ActivitySelect(discord.ui.Select):
-            def __init__(self):
-                options = [
-                    discord.SelectOption(label="Playing", description="Set bot as Playing ..."),
-                    discord.SelectOption(label="Watching", description="Set bot as Watching ..."),
-                    discord.SelectOption(label="Listening", description="Set bot as Listening ..."),
-                    discord.SelectOption(label="Competing", description="Set bot as Competing ...")
-                ]
-                super().__init__(placeholder="Select activity type...", min_values=1, max_values=1, options=options)
+    @app_commands.choices(activity=[
+        app_commands.Choice(name="Playing", value="playing"),
+        app_commands.Choice(name="Watching", value="watching"),
+        app_commands.Choice(name="Listening", value="listening"),
+        app_commands.Choice(name="Competing", value="competing")
+    ])
+    async def status(self, interaction: discord.Interaction, activity: app_commands.Choice[str], text: str):
+        """Set the bot presence"""
+        activity_type = activity.value
 
-            async def callback(self, select_interaction: discord.Interaction):
-                # Respond immediately to avoid interaction failed
-                await select_interaction.response.defer(ephemeral=True)
+        if activity_type == "playing":
+            await self.bot.change_presence(activity=discord.Game(name=text))
+        elif activity_type == "watching":
+            await self.bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=text))
+        elif activity_type == "listening":
+            await self.bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=text))
+        elif activity_type == "competing":
+            await self.bot.change_presence(activity=discord.Activity(type=discord.ActivityType.competing, name=text))
 
-                choice = self.values[0]
-
-                if choice == "Playing":
-                    await self.bot.change_presence(activity=discord.Game(name=message))
-                elif choice == "Watching":
-                    await self.bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=message))
-                elif choice == "Listening":
-                    await self.bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=message))
-                elif choice == "Competing":
-                    await self.bot.change_presence(activity=discord.Activity(type=discord.ActivityType.competing, name=message))
-
-                # Send confirmation after deferred response
-                await select_interaction.followup.send(
-                    f"✅ Status updated: **{choice} {message}**", ephemeral=True
-                )
-
-        view = discord.ui.View()
-        view.add_item(ActivitySelect())
-        await interaction.response.send_message(
-            "Select the activity type for the bot:", view=view, ephemeral=True
-        )
+        await interaction.response.send_message(f"✅ Status updated: **{activity.name} {text}**", ephemeral=True)
 
 
 async def setup(bot):
