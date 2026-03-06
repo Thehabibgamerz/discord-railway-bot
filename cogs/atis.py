@@ -4,7 +4,7 @@ from discord import app_commands
 import aiohttp
 
 IF_API_KEY = "tephscpkg4qe7xxkrfwvo9qrteksdj0l"
-BASE_URL = "https://api.infiniteflight.com/public/v2/sessions/{sessionId}/airport/{airportIcao}/atis"
+BASE_URL = "https://api.infiniteflight.com/public/v2/sessions/{sessionId}/airport/{airportIcao}/atisapikey=tephscpkg4qe7xxkrfwvo9qrteksdj0l"
 
 # Map friendly server names to API session names
 SERVER_MAP = {
