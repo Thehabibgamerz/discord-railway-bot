@@ -32,14 +32,14 @@ class GiveawayView(View):
         await interaction.response.send_message("❌ You were removed from the giveaway.", ephemeral=True)
 
 
-class GiveawayProAdvanced(commands.Cog):
+class GiveawayProFinal(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.active_giveaways = {}
 
     @app_commands.command(
         name="create_giveaway",
-        description="Create a giveaway with host, participants list, and end time"
+        description="Create a giveaway with participants list and end time"
     )
     @app_commands.describe(
         title="Giveaway title",
@@ -87,10 +87,10 @@ class GiveawayProAdvanced(commands.Cog):
         # Initial embed
         embed = discord.Embed(
             title=f"🎁 {title}",
-            description=f"📋 {description}\n\n👤 Hosted by: {interaction.user.mention}\n⏰ Ends on: {ends_on} IST\n\n**Participants:** None yet",
+            description=f"📋 {description}\n\n⏰ Ends on: {end_time.strftime('%A, %d %B %Y %I:%M %p')} IST\n\n**Participants:** None yet",
             color=discord.Color.orange()
         )
-        embed.set_author(name=f"{interaction.user}", icon_url=interaction.user.display_avatar.url)
+        embed.set_footer(text=f"Hosted by {interaction.user}", icon_url=interaction.user.display_avatar.url)
         if image:
             embed.set_image(url=image)
 
@@ -117,7 +117,6 @@ class GiveawayProAdvanced(commands.Cog):
 
             embed.description = (
                 f"📋 {description}\n\n"
-                f"👤 Hosted by: {interaction.user.mention}\n"
                 f"⏰ Ends on: {end_time.strftime('%A, %d %B %Y %I:%M %p')} IST\n\n"
                 f"**Participants ({len(participants)}):**\n{participants_text}\n\n{countdown_text}"
             )
@@ -135,4 +134,4 @@ class GiveawayProAdvanced(commands.Cog):
 
 
 async def setup(bot):
-    await bot.add_cog(GiveawayProAdvanced(bot))
+    await bot.add_cog(GiveawayProFinal(bot))
