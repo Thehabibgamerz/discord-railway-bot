@@ -27,6 +27,9 @@ class Status(commands.Cog):
                 super().__init__(placeholder="Select activity type...", min_values=1, max_values=1, options=options)
 
             async def callback(self, select_interaction: discord.Interaction):
+                # Respond immediately to avoid interaction failed
+                await select_interaction.response.defer(ephemeral=True)
+
                 choice = self.values[0]
 
                 if choice == "Playing":
@@ -38,7 +41,8 @@ class Status(commands.Cog):
                 elif choice == "Competing":
                     await self.bot.change_presence(activity=discord.Activity(type=discord.ActivityType.competing, name=message))
 
-                await select_interaction.response.send_message(
+                # Send confirmation after deferred response
+                await select_interaction.followup.send(
                     f"✅ Status updated: **{choice} {message}**", ephemeral=True
                 )
 
@@ -47,6 +51,7 @@ class Status(commands.Cog):
         await interaction.response.send_message(
             "Select the activity type for the bot:", view=view, ephemeral=True
         )
+
 
 async def setup(bot):
     await bot.add_cog(Status(bot))
