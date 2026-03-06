@@ -1,24 +1,59 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from discord.ui import View, Button
-from datetime import datetime, timezone
+from discord.ui import View, Button, Modal, TextInput
+from datetime import datetime, timezone, timedelta
 import asyncio
 import re
 
+STAFF_ROLE_ID = 1389824693388837035  # Change to your staff role ID
+
+# Countdown bar
 def countdown_bar(total_seconds, remaining_seconds, length=10):
     filled = int(length * (total_seconds - remaining_seconds) / total_seconds)
     empty = length - filled
     return "🟧" * filled + "⬛" * empty
 
+# Natural-language datetime parser
+def parse_datetime(input_str: str):
+    input_str = input_str.strip().lower()
+    now = datetime.now(timezone.utc)
+    # in Xh Ym format
+    match = re.match(r"in (\d+)h(?: (\d+)m)?", input_str)
+    if match:
+        hours = int(match.group(1))
+        minutes = int(match.group(2)) if match.group(2) else 0
+        return now + timedelta(hours=hours, minutes=minutes)
+    # tomorrow HH:MM
+    match = re.match(r"tomorrow (\d{1,2}):(\d{2})", input_str)
+    if match:
+        hour = int(match.group(1))
+        minute = int(match.group(2))
+        dt = datetime(now.year, now.month, now.day, hour, minute, tzinfo=timezone.utc) + timedelta(days=1)
+        return dt
+    # standard formats
+    formats = [
+        "%Y-%m-%d %H:%M",
+        "%d/%m/%Y %H:%M",
+        "%Y-%m-%d %I:%M %p",
+        "%d/%m/%Y %I:%M %p"
+    ]
+    for fmt in formats:
+        try:
+            return datetime.strptime(input_str, fmt).replace(tzinfo=timezone.utc)
+        except:
+            continue
+    return None
+
 class EventButtons(View):
-    def __init__(self, attendees, max_users, embed_msg, event_time):
+    def __init__(self, attendees, max_users, embed_msg, event_time, host):
         super().__init__(timeout=None)
         self.attendees = attendees
         self.max_users = max_users
         self.embed_msg = embed_msg
         self.locked = False
         self.event_time = event_time
+        self.host = host
 
     async def update_embed(self):
         embed = self.embed_msg.embeds[0]
@@ -26,11 +61,11 @@ class EventButtons(View):
         attending_text = "\n".join([u.mention for u in unique_users]) if unique_users else "No attendees yet"
         embed.set_field_at(1, name=f"Attending ({len(unique_users)}/{self.max_users})", value=attending_text, inline=False)
 
+        # Countdown
         now_ts = int(datetime.now(timezone.utc).timestamp())
         remaining = max(int(self.event_time.timestamp()) - now_ts, 0)
         total = max(int(self.event_time.timestamp()) - (now_ts - remaining), 1)
         bar = countdown_bar(total, remaining)
-
         if not self.locked:
             hours = remaining // 3600
             minutes = (remaining % 3600) // 60
@@ -41,6 +76,7 @@ class EventButtons(View):
                 value=f"{self.event_time.strftime('%A, %d %B %Y %I:%M %p')} | ⏳ {hours}h {minutes}m {seconds}s\n{bar}",
                 inline=False
             )
+        embed.set_footer(text=f"Host: {self.host}", icon_url=self.host.display_avatar.url)
         await self.embed_msg.edit(embed=embed, view=self)
 
     @discord.ui.button(label="I'm Attending", emoji="✅", style=discord.ButtonStyle.success)
@@ -60,37 +96,52 @@ class EventButtons(View):
         await self.update_embed()
         await interaction.response.send_message("You left the event.", ephemeral=True)
 
+    @discord.ui.button(label="Edit Event", emoji="✏️", style=discord.ButtonStyle.secondary)
+    async def edit_event(self, interaction: discord.Interaction, button: Button):
+        # Only staff can edit
+        if not any(role.id == STAFF_ROLE_ID for role in interaction.user.roles):
+            await interaction.response.send_message("Only staff can edit events.", ephemeral=True)
+            return
 
-def parse_datetime(input_str: str):
-    """
-    Robust parser: supports multiple formats, strips spaces, handles 24h and 12h
-    """
-    input_str = input_str.strip().upper()
-    # Remove multiple spaces
-    input_str = re.sub(r"\s+", " ", input_str)
+        modal = EventEditModal(self)
+        await interaction.response.send_modal(modal)
 
-    formats = [
-        "%Y-%m-%d %H:%M",
-        "%d/%m/%Y %H:%M",
-        "%Y-%m-%d %I:%M %p",
-        "%d/%m/%Y %I:%M %p",
-    ]
-    for fmt in formats:
-        try:
-            return datetime.strptime(input_str, fmt).replace(tzinfo=timezone.utc)
-        except:
-            continue
-    return None
+class EventEditModal(Modal):
+    def __init__(self, view: EventButtons):
+        super().__init__(title="Edit Event")
+        self.view_ref = view
+        self.title_input = TextInput(label="Title", default=view.embed_msg.embeds[0].title, required=False)
+        self.desc_input = TextInput(label="Description", style=discord.TextStyle.paragraph,
+                                    default=view.embed_msg.embeds[0].description, required=False)
+        self.time_input = TextInput(label="Datetime", default=view.event_time.strftime("%Y-%m-%d %H:%M"), required=False)
+        self.add_item(self.title_input)
+        self.add_item(self.desc_input)
+        self.add_item(self.time_input)
 
+    async def on_submit(self, interaction: discord.Interaction):
+        embed = self.view_ref.embed_msg.embeds[0]
+        if self.title_input.value:
+            embed.title = self.title_input.value
+        if self.desc_input.value:
+            embed.description = self.desc_input.value
+        if self.time_input.value:
+            new_dt = parse_datetime(self.time_input.value)
+            if new_dt:
+                self.view_ref.event_time = new_dt
+            else:
+                await interaction.response.send_message("Invalid datetime format!", ephemeral=True)
+                return
+        await self.view_ref.update_embed()
+        await interaction.response.send_message("Event updated successfully.", ephemeral=True)
 
 class Event(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="createevent", description="Create a PRO Sesh-style event")
+    @app_commands.command(name="createevent", description="Create PRO Sesh Event with natural-language datetime")
     @app_commands.describe(
         title="Event title",
-        datetime="Event time e.g., 2026-03-06 12:00, 06/03/2026 12:00, or 12:00 PM",
+        datetime="Datetime (e.g., YYYY-MM-DD HH:MM, DD/MM/YYYY HH:MM, 'tomorrow 12:00', 'in 2h30m')",
         description="Event description",
         channel="Channel to post event",
         max_attendees="Maximum attendees",
@@ -111,11 +162,8 @@ class Event(commands.Cog):
         image: str = None
     ):
         dt = parse_datetime(datetime)
-        if dt is None:
-            await interaction.response.send_message(
-                "❌ Invalid datetime! Use formats like:\n`2026-03-06 12:00`\n`06/03/2026 12:00`\n`12:00 PM`",
-                ephemeral=True
-            )
+        if not dt:
+            await interaction.response.send_message("Invalid datetime! Try 'YYYY-MM-DD HH:MM', 'DD/MM/YYYY HH:MM', 'tomorrow 12:00', or 'in 2h30m'.", ephemeral=True)
             return
 
         embed = discord.Embed(
@@ -129,7 +177,7 @@ class Event(commands.Cog):
             inline=False
         )
         embed.add_field(name=f"Attending (0/{max_attendees})", value="No attendees yet", inline=False)
-        embed.add_field(name="Host", value=interaction.user.mention, inline=False)
+        embed.set_footer(text=f"Host: {interaction.user}", icon_url=interaction.user.display_avatar.url)
         if image:
             embed.set_image(url=image)
 
@@ -137,11 +185,11 @@ class Event(commands.Cog):
         msg = await channel.send(content=mention_text, embed=embed)
 
         attendees = []
-        view = EventButtons(attendees, max_attendees, msg, dt)
+        view = EventButtons(attendees, max_attendees, msg, dt, interaction.user)
         await msg.edit(view=view)
         await interaction.response.send_message(f"✅ Event created in {channel.mention}", ephemeral=True)
 
-        # Real-time countdown
+        # Countdown loop
         while True:
             now_ts = int(datetime.now(timezone.utc).timestamp())
             if now_ts >= int(dt.timestamp()):
@@ -149,17 +197,16 @@ class Event(commands.Cog):
             await view.update_embed()
             await asyncio.sleep(30)
 
-        # Lock and announce start
+        # Lock and announce
         view.locked = True
         start_embed = discord.Embed(
             title=f"🚀 {title} Started!",
-            description=f"The event is now live!",
+            description="The event is now live!",
             color=discord.Color.orange()
         )
         start_mention = on_start_mentions.mention if on_start_mentions else ""
         await channel.send(content=start_mention, embed=start_embed)
         await view.update_embed()
-
 
 async def setup(bot):
     await bot.add_cog(Event(bot))
