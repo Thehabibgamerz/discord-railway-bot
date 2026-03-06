@@ -3,11 +3,9 @@ from discord.ext import commands
 from discord import app_commands
 import aiohttp
 
-# Replace with your actual Infinite Flight Live API key
 IF_API_KEY = "tephscpkg4qe7xxkrfwvo9qrteksdj0l"
 BASE_URL = "https://api.infiniteflight.com/public/v2/sessions/{sessionId}/airport/{airportIcao}/atis"
 
-# Map friendly names to possible session names/IDs later
 SERVER_MAP = {
     "Casual": "casual",
     "Training": "training",
@@ -34,7 +32,6 @@ class ATIS(commands.Cog):
             await interaction.response.send_message("❌ Invalid server selection.", ephemeral=True)
             return
 
-        # Step 1: Get all active sessions from IF Live API
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{BASE_URL}/sessions?apikey={IF_API_KEY}") as resp:
                 if resp.status != 200:
@@ -47,11 +44,8 @@ class ATIS(commands.Cog):
             await interaction.response.send_message("⚠️ No active sessions found.", ephemeral=True)
             return
 
-        # Step 2: Find session ID that matches the server name
         session_id = None
         for s in sessions:
-            # Session JSON usually contains "sessionName" or similar
-            # Here we check by name if it matches the friendly server key.
             if server_key.lower() in s.get("name", "").lower():
                 session_id = s.get("id")
                 break
@@ -62,7 +56,6 @@ class ATIS(commands.Cog):
             )
             return
 
-        # Step 3: Fetch ATIS for the airport
         airport = airport.upper()
         async with aiohttp.ClientSession() as session:
             url = f"{BASE_URL}/sessions/{session_id}/airport/{airport}/atis?apikey={IF_API_KEY}"
@@ -75,7 +68,6 @@ class ATIS(commands.Cog):
 
                 atis_data = await resp.json()
 
-        # Check API error codes (e.g., No ATIS available)
         error_code = atis_data.get("errorCode")
         result_text = atis_data.get("result")
 
@@ -85,7 +77,6 @@ class ATIS(commands.Cog):
             )
             return
 
-        # Step 4: Reply with live ATIS
         embed = discord.Embed(
             title=f"ATIS for {airport} — {server}",
             description=f"📡 {result_text}",
@@ -93,3 +84,8 @@ class ATIS(commands.Cog):
         )
         embed.set_footer(text="Data provided by Infinite Flight Live API")
         await interaction.response.send_message(embed=embed)
+
+
+# ✅ THIS IS THE MANDATORY SETUP FUNCTION
+async def setup(bot):
+    await bot.add_cog(ATIS(bot))
