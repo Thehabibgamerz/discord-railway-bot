@@ -2,16 +2,17 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from discord.ui import View, Button, Modal, TextInput
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 import asyncio
 import re
 
 STAFF_ROLE_ID = 1389824693388837035  # Change to your staff role ID
+IST_OFFSET = timedelta(hours=5, minutes=30)  # IST = UTC+5:30
 
-# Natural-language datetime parser
+# Natural-language datetime parser (local IST)
 def parse_datetime(input_str: str):
     input_str = input_str.strip().lower()
-    now = datetime.now(timezone.utc)
+    now = datetime.now() + IST_OFFSET
     
     # in Xh Ym format
     match = re.match(r"in (\d+)h(?: (\d+)m)?", input_str)
@@ -25,7 +26,7 @@ def parse_datetime(input_str: str):
     if match:
         hour = int(match.group(1))
         minute = int(match.group(2))
-        dt = datetime(now.year, now.month, now.day, hour, minute, tzinfo=timezone.utc) + timedelta(days=1)
+        dt = datetime(now.year, now.month, now.day, hour, minute) + timedelta(days=1)
         return dt
     
     # standard formats
@@ -37,7 +38,7 @@ def parse_datetime(input_str: str):
     ]
     for fmt in formats:
         try:
-            return datetime.strptime(input_str, fmt).replace(tzinfo=timezone.utc)
+            return datetime.strptime(input_str, fmt)
         except:
             continue
     return None
@@ -57,15 +58,16 @@ class EventButtons(View):
         attending_text = "\n".join([u.mention for u in unique_users]) if unique_users else "No attendees yet"
         embed.set_field_at(1, name="Attending", value=attending_text, inline=False)
 
-        now_ts = int(datetime.now(timezone.utc).timestamp())
-        remaining = max(int(self.event_time.timestamp()) - now_ts, 0)
+        # Countdown in IST
+        now = datetime.now() + IST_OFFSET
+        remaining = max(int((self.event_time - now).total_seconds()), 0)
         if not self.locked:
             hours = remaining // 3600
             minutes = (remaining % 3600) // 60
             seconds = remaining % 60
             embed.set_field_at(
                 0,
-                name="Event Time",
+                name="Event Time (IST)",
                 value=f"{self.event_time.strftime('%A, %d %B %Y %I:%M %p')} | ⏳ {hours}h {minutes}m {seconds}s remaining",
                 inline=False
             )
@@ -129,7 +131,7 @@ class Event(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="createevent", description="Create a simplified PRO Sesh Event")
+    @app_commands.command(name="createevent", description="Create PRO Sesh Event (IST Local Time)")
     @app_commands.describe(
         title="Event title",
         datetime="Datetime (e.g., 'tomorrow 12:00', 'in 2h30m', 'YYYY-MM-DD HH:MM')",
@@ -153,7 +155,7 @@ class Event(commands.Cog):
         dt = parse_datetime(datetime)
         if not dt:
             await interaction.response.send_message(
-                "❌ Invalid datetime! Use formats like 'tomorrow 12:00', 'in 2h30m', or 'YYYY-MM-DD HH:MM'.",
+                "❌ Invalid datetime! Use 'tomorrow 12:00', 'in 2h30m', or 'YYYY-MM-DD HH:MM'.",
                 ephemeral=True
             )
             return
@@ -164,7 +166,7 @@ class Event(commands.Cog):
             color=discord.Color.orange()
         )
         embed.add_field(
-            name="Event Time",
+            name="Event Time (IST)",
             value=f"{dt.strftime('%A, %d %B %Y %I:%M %p')} | ⏳ calculating...",
             inline=False
         )
@@ -181,10 +183,10 @@ class Event(commands.Cog):
         await msg.edit(view=view)
         await interaction.response.send_message(f"✅ Event created in {channel.mention}", ephemeral=True)
 
-        # Real-time countdown
+        # Countdown loop in IST
         while True:
-            now_ts = int(datetime.now(timezone.utc).timestamp())
-            if now_ts >= int(dt.timestamp()):
+            now = datetime.now() + timedelta(hours=5, minutes=30)
+            if now >= dt:
                 break
             await view.update_embed()
             await asyncio.sleep(30)
