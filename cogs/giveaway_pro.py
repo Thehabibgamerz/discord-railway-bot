@@ -1,5 +1,5 @@
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 from discord import app_commands
 from discord.ui import View, Button
 from datetime import datetime, timedelta
@@ -17,7 +17,7 @@ class GiveawayView(View):
     async def enter(self, interaction: discord.Interaction, button: Button):
         user_id = interaction.user.id
         if user_id in self.giveaway_data["participants"]:
-            await interaction.response.send_message("You are already entered!", ephemeral=True)
+            await interaction.response.send_message("⚠️ You are already entered!", ephemeral=True)
             return
         self.giveaway_data["participants"].append(user_id)
         await interaction.response.send_message("✅ You entered the giveaway!", ephemeral=True)
@@ -26,27 +26,27 @@ class GiveawayView(View):
     async def remove(self, interaction: discord.Interaction, button: Button):
         user_id = interaction.user.id
         if user_id not in self.giveaway_data["participants"]:
-            await interaction.response.send_message("You are not entered!", ephemeral=True)
+            await interaction.response.send_message("⚠️ You are not entered!", ephemeral=True)
             return
         self.giveaway_data["participants"].remove(user_id)
         await interaction.response.send_message("❌ You were removed from the giveaway.", ephemeral=True)
 
 
-class GiveawayPro(commands.Cog):
+class GiveawayProAdvanced(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.active_giveaways = {}  # channel_id: giveaway_data
+        self.active_giveaways = {}
 
     @app_commands.command(
         name="create_giveaway",
-        description="Create a giveaway"
+        description="Create a giveaway with host, participants list, and end time"
     )
     @app_commands.describe(
         title="Giveaway title",
         description="Giveaway description",
         ends_on="End time in YYYY-MM-DD HH:MM (IST)",
         channel="Channel to post",
-        on_create_mentions="Optional role(s) to mention on create",
+        on_create_mentions="Optional role(s) to mention",
         image="Optional giveaway image URL"
     )
     async def create_giveaway(
@@ -61,13 +61,13 @@ class GiveawayPro(commands.Cog):
     ):
         # Parse datetime
         try:
-            end_time = datetime.strptime(ends_on, "%Y-%m-%d %H:%M") - IST_OFFSET + IST_OFFSET
+            end_time = datetime.strptime(ends_on, "%Y-%m-%d %H:%M")
         except ValueError:
-            await interaction.response.send_message("Invalid datetime format! Use YYYY-MM-DD HH:MM", ephemeral=True)
+            await interaction.response.send_message("❌ Invalid datetime format! Use YYYY-MM-DD HH:MM", ephemeral=True)
             return
 
         if end_time <= datetime.now() + IST_OFFSET:
-            await interaction.response.send_message("End time must be in the future.", ephemeral=True)
+            await interaction.response.send_message("❌ End time must be in the future.", ephemeral=True)
             return
 
         # Giveaway data
@@ -84,12 +84,13 @@ class GiveawayPro(commands.Cog):
 
         self.active_giveaways[channel.id] = giveaway_data
 
-        # Send giveaway embed
+        # Initial embed
         embed = discord.Embed(
-            title=f"🎉 {title}",
-            description=f"{description}\n\nHosted by: {interaction.user.mention}",
+            title=f"🎁 {title}",
+            description=f"📋 {description}\n\n👤 Hosted by: {interaction.user.mention}\n⏰ Ends on: {ends_on} IST\n\n**Participants:** None yet",
             color=discord.Color.orange()
         )
+        embed.set_author(name=f"{interaction.user}", icon_url=interaction.user.display_avatar.url)
         if image:
             embed.set_image(url=image)
 
@@ -111,7 +112,15 @@ class GiveawayPro(commands.Cog):
             seconds = remaining % 60
             countdown_text = f"⏱️ Time Remaining: {hours}h {minutes}m {seconds}s"
 
-            embed.description = f"{description}\n\nHosted by: {interaction.user.mention}\n{countdown_text}"
+            participants = [f"<@{uid}>" for uid in giveaway_data["participants"]]
+            participants_text = "\n".join(participants) if participants else "No participants yet"
+
+            embed.description = (
+                f"📋 {description}\n\n"
+                f"👤 Hosted by: {interaction.user.mention}\n"
+                f"⏰ Ends on: {end_time.strftime('%A, %d %B %Y %I:%M %p')} IST\n\n"
+                f"**Participants ({len(participants)}):**\n{participants_text}\n\n{countdown_text}"
+            )
             await message.edit(embed=embed)
 
         # End giveaway
@@ -120,11 +129,10 @@ class GiveawayPro(commands.Cog):
             await channel.send(f"❌ Giveaway **{title}** ended. No participants.")
         else:
             winner_id = random.choice(participants)
-            await channel.send(f"🎉 Giveaway **{title}** ended! Winner: <@{winner_id}>")
+            await channel.send(f"🎉 Giveaway **{title}** ended! Winner: <@{winner_id}> 🏆")
 
-        # Remove from active giveaways
         del self.active_giveaways[channel.id]
 
 
 async def setup(bot):
-    await bot.add_cog(GiveawayPro(bot))
+    await bot.add_cog(GiveawayProAdvanced(bot))
