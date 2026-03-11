@@ -1,72 +1,118 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
+import aiohttp
+import os
 
-STAFF_ROLE = 1389824693388837035
+IF_API_KEY = os.getenv("IF_API_KEY")
+BASE_URL = "https://api.infiniteflight.com/public/v2"
 
-# Stored prefixes
-tracked_callsigns = ["Akasa Air"]
+class FlightTracker(commands.Cog):
 
-class CallsignManager(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.radar_message = None
+        self.update_radar.start()
 
-    # Add callsign
-    @app_commands.command(name="addcallsign", description="Add airline callsign prefix")
-    async def addcallsign(self, interaction: discord.Interaction, prefix: str):
+    async def get_session_id(self):
 
-        if STAFF_ROLE not in [r.id for r in interaction.user.roles]:
-            await interaction.response.send_message("❌ Staff only.", ephemeral=True)
-            return
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{BASE_URL}/sessions?apikey={IF_API_KEY}") as resp:
+                data = await resp.json()
 
-        if prefix in tracked_callsigns:
-            await interaction.response.send_message("⚠️ Callsign already added.", ephemeral=True)
-            return
+        for s in data["result"]:
+            if "Expert" in s["name"]:
+                return s["id"]
 
-        tracked_callsigns.append(prefix)
+        return data["result"][0]["id"]
 
-        embed = discord.Embed(
-            title="✅ Callsign Added",
-            description=f"Tracking flights for **{prefix}**",
-            color=discord.Color.green()
-        )
+    async def get_flights(self):
 
-        await interaction.response.send_message(embed=embed)
+        session_id = await self.get_session_id()
 
-    # Remove callsign
-    @app_commands.command(name="removecallsign", description="Remove airline callsign")
-    async def removecallsign(self, interaction: discord.Interaction, prefix: str):
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{BASE_URL}/sessions/{session_id}/flights?apikey={IF_API_KEY}") as resp:
+                data = await resp.json()
 
-        if STAFF_ROLE not in [r.id for r in interaction.user.roles]:
-            await interaction.response.send_message("❌ Staff only.", ephemeral=True)
-            return
+        return data["result"]
 
-        if prefix not in tracked_callsigns:
-            await interaction.response.send_message("⚠️ Callsign not found.", ephemeral=True)
-            return
+    @app_commands.command(name="flighttracker", description="Show live Akasa Air flights")
+    async def flighttracker(self, interaction: discord.Interaction):
 
-        tracked_callsigns.remove(prefix)
+        await interaction.response.defer()
 
-        embed = discord.Embed(
-            title="🗑️ Callsign Removed",
-            description=f"Stopped tracking **{prefix}** flights",
-            color=discord.Color.red()
-        )
+        flights = await self.get_flights()
 
-        await interaction.response.send_message(embed=embed)
-
-    # List callsigns
-    @app_commands.command(name="callsigns", description="List tracked airline callsigns")
-    async def callsigns(self, interaction: discord.Interaction):
+        qp_flights = [
+            f for f in flights
+            if f["callsign"].endswith("QP")
+        ]
 
         embed = discord.Embed(
-            title="✈️ Tracked Callsigns",
-            description="\n".join(tracked_callsigns),
+            title="🛫 Akasa Air Live Flight Tracker",
             color=discord.Color.orange()
         )
 
-        await interaction.response.send_message(embed=embed)
+        if not qp_flights:
+            embed.description = "No QP flights currently active."
+        else:
+
+            for f in qp_flights[:15]:
+
+                embed.add_field(
+                    name=f["callsign"],
+                    value=(
+                        f"Route: {f['departureAirportIcao']} → {f['arrivalAirportIcao']}\n"
+                        f"Aircraft: {f['aircraftId']}\n"
+                        f"Altitude: {round(f['altitude'])} ft\n"
+                        f"Speed: {round(f['speed'])} kts"
+                    ),
+                    inline=False
+                )
+
+        msg = await interaction.followup.send(embed=embed)
+        self.radar_message = msg
+
+    @tasks.loop(seconds=30)
+    async def update_radar(self):
+
+        if not self.radar_message:
+            return
+
+        flights = await self.get_flights()
+
+        qp_flights = [
+            f for f in flights
+            if f["callsign"].endswith("QP")
+        ]
+
+        embed = discord.Embed(
+            title="🛫 Akasa Air Live Flight Tracker",
+            color=discord.Color.orange()
+        )
+
+        if not qp_flights:
+            embed.description = "No QP flights currently active."
+        else:
+
+            for f in qp_flights[:15]:
+
+                embed.add_field(
+                    name=f["callsign"],
+                    value=(
+                        f"Route: {f['departureAirportIcao']} → {f['arrivalAirportIcao']}\n"
+                        f"Aircraft: {f['aircraftId']}\n"
+                        f"Altitude: {round(f['altitude'])} ft\n"
+                        f"Speed: {round(f['speed'])} kts"
+                    ),
+                    inline=False
+                )
+
+        try:
+            await self.radar_message.edit(embed=embed)
+        except:
+            self.radar_message = None
 
 
 async def setup(bot):
-    await bot.add_cog(CallsignManager(bot))
+    await bot.add_cog(FlightTracker(bot))
