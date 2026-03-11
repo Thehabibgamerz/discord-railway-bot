@@ -1,15 +1,12 @@
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-from datetime import datetime
+import datetime
 import pytz
 
 IST = pytz.timezone("Asia/Kolkata")
 
-STAFF_ROLE = 1389824693388837035
-ROUTE_CHANNEL = 1389839700642238516
-
-# Storage (simple memory storage)
+# Storage (can later upgrade to JSON/database)
 weekly_routes = {
     "Monday": [],
     "Tuesday": [],
@@ -20,164 +17,144 @@ weekly_routes = {
     "Sunday": []
 }
 
-multipliers = {
-    "Monday": "1x",
-    "Tuesday": "1x",
-    "Wednesday": "1x",
-    "Thursday": "1x",
-    "Friday": "2x",
-    "Saturday": "2x",
-    "Sunday": "2x"
-}
+multiplier = "2x"
 
+class FeaturedRoutes(commands.Cog):
 
-class Routes(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.route_channel = None
         self.auto_post.start()
 
-    # ----------------------------
-    # Set route channel
-    # ----------------------------
+    # Auto post every midnight IST
+    @tasks.loop(minutes=1)
+    async def auto_post(self):
 
-    @app_commands.command(name="setroutechannel", description="Set the featured routes channel")
-    async def setroutechannel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        now = datetime.datetime.now(IST)
 
-        if STAFF_ROLE not in [r.id for r in interaction.user.roles]:
-            await interaction.response.send_message("❌ Staff only.", ephemeral=True)
-            return
+        if now.hour == 0 and now.minute == 0 and self.route_channel:
 
-        global ROUTE_CHANNEL
-        ROUTE_CHANNEL = channel.id
+            today = now.strftime("%A")
 
-        await interaction.response.send_message(f"✅ Routes channel set to {channel.mention}")
+            routes = weekly_routes.get(today, [])
 
-    # ----------------------------
-    # Set routes
-    # ----------------------------
+            embed = discord.Embed(
+                title=f"🗺️ Featured Routes — {today}",
+                description=(
+                    f"All pilots are eligible to fly the following featured routes.\n"
+                    f"These flights offer a **{multiplier} multiplier**, making it a great opportunity to maximize your rewards.\n\n"
+                    f"Ensure compliance with airline procedures and standard operating practices."
+                ),
+                color=discord.Color.orange()
+            )
 
-    @app_commands.command(name="setroutes", description="Set routes for a specific day")
-    async def setroutes(
-        self,
-        interaction: discord.Interaction,
-        day: str,
-        multiplier: str,
-        route1: str,
-        route2: str,
-        route3: str
-    ):
+            if routes:
+                embed.add_field(
+                    name="Routes",
+                    value="\n".join(routes),
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="Routes",
+                    value="No routes scheduled.",
+                    inline=False
+                )
 
-        if STAFF_ROLE not in [r.id for r in interaction.user.roles]:
-            await interaction.response.send_message("❌ Staff only.", ephemeral=True)
-            return
+            await self.route_channel.send(embed=embed)
+
+    # Set channel
+    @app_commands.command(name="setrouteschannel", description="Set the featured routes posting channel")
+    async def setrouteschannel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+
+        self.route_channel = channel
+
+        await interaction.response.send_message(
+            f"✅ Featured routes will now post in {channel.mention}", ephemeral=True
+        )
+
+    # Add route
+    @app_commands.command(name="addroute", description="Add a route to a specific day")
+    async def addroute(self, interaction: discord.Interaction, day: str, route: str):
 
         day = day.capitalize()
 
-        weekly_routes[day] = [route1, route2, route3]
-        multipliers[day] = multiplier
+        if day not in weekly_routes:
+            await interaction.response.send_message("❌ Invalid day.", ephemeral=True)
+            return
 
-        await interaction.response.send_message(f"✅ Routes updated for **{day}**")
+        weekly_routes[day].append(route)
 
-    # ----------------------------
-    # Weekly preview
-    # ----------------------------
+        await interaction.response.send_message(
+            f"✅ Route added to **{day}**", ephemeral=True
+        )
 
+    # Remove route
+    @app_commands.command(name="removeroute", description="Remove a route from a day")
+    async def removeroute(self, interaction: discord.Interaction, day: str, index: int):
+
+        day = day.capitalize()
+
+        try:
+            weekly_routes[day].pop(index-1)
+            await interaction.response.send_message("🗑️ Route removed.", ephemeral=True)
+        except:
+            await interaction.response.send_message("❌ Invalid route index.", ephemeral=True)
+
+    # Set multiplier
+    @app_commands.command(name="setmultiplier", description="Change route multiplier")
+    async def setmultiplier(self, interaction: discord.Interaction, value: str):
+
+        global multiplier
+        multiplier = value
+
+        await interaction.response.send_message(
+            f"⭐ Multiplier updated to **{value}**", ephemeral=True
+        )
+
+    # Preview weekly routes
     @app_commands.command(name="weeklyroutes", description="Preview weekly featured routes")
     async def weeklyroutes(self, interaction: discord.Interaction):
 
         embed = discord.Embed(
-            title="🗺️ Weekly Featured Routes",
+            title="🗺️ Weekly Featured Routes Schedule",
             color=discord.Color.orange()
         )
 
         for day, routes in weekly_routes.items():
 
-            if not routes:
-                routes_text = "No routes set"
+            if routes:
+                value = "\n".join(routes)
             else:
-                routes_text = "\n".join(routes)
+                value = "No routes scheduled."
 
             embed.add_field(
-                name=f"{day} • Multiplier {multipliers[day]}",
-                value=routes_text,
+                name=day,
+                value=value,
                 inline=False
             )
 
         await interaction.response.send_message(embed=embed)
 
-    # ----------------------------
-    # Post today's routes
-    # ----------------------------
-
-    async def post_today_routes(self, channel):
-
-        today = datetime.now(IST).strftime("%A")
-        routes = weekly_routes.get(today, [])
-
-        if not routes:
-            return
+    # Dashboard command
+    @app_commands.command(name="routesdashboard", description="View and manage featured routes")
+    async def routesdashboard(self, interaction: discord.Interaction):
 
         embed = discord.Embed(
-            title=f"🗺️ Featured Routes — {today}",
+            title="⚙️ Featured Routes Dashboard",
             description=(
-                "All pilots are eligible to fly the following featured routes.\n"
-                f"These flights offer a **{multipliers[today]} multiplier**, "
-                "making it a great opportunity to maximize your rewards.\n\n"
-                "Ensure compliance with airline procedures and standard operating practices."
+                "Use the following commands to manage routes:\n\n"
+                "`/addroute` — Add route\n"
+                "`/removeroute` — Remove route\n"
+                "`/setmultiplier` — Change multiplier\n"
+                "`/weeklyroutes` — View schedule\n"
+                "`/setrouteschannel` — Set posting channel"
             ),
             color=discord.Color.orange()
         )
 
-        embed.add_field(
-            name="Routes",
-            value="\n".join(routes),
-            inline=False
-        )
-
-        embed.set_footer(text="Akasa Air Virtual • Happy Flying ✈️")
-
-        await channel.send(embed=embed)
-
-    # ----------------------------
-    # Manual post
-    # ----------------------------
-
-    @app_commands.command(name="postroutes", description="Post today's featured routes")
-    async def postroutes(self, interaction: discord.Interaction):
-
-        if STAFF_ROLE not in [r.id for r in interaction.user.roles]:
-            await interaction.response.send_message("❌ Staff only.", ephemeral=True)
-            return
-
-        if ROUTE_CHANNEL is None:
-            await interaction.response.send_message("⚠️ Routes channel not set.", ephemeral=True)
-            return
-
-        channel = interaction.guild.get_channel(ROUTE_CHANNEL)
-
-        await self.post_today_routes(channel)
-
-        await interaction.response.send_message("✅ Routes posted.")
-
-    # ----------------------------
-    # Auto post daily at midnight IST
-    # ----------------------------
-
-    @tasks.loop(minutes=1)
-    async def auto_post(self):
-
-        now = datetime.now(IST)
-
-        if now.hour == 0 and now.minute == 0:
-
-            if ROUTE_CHANNEL is None:
-                return
-
-            channel = self.bot.get_channel(ROUTE_CHANNEL)
-
-            if channel:
-                await self.post_today_routes(channel)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def setup(bot):
-    await bot.add_cog(Routes(bot))
+    await bot.add_cog(FeaturedRoutes(bot))
