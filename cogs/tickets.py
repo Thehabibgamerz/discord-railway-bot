@@ -23,11 +23,11 @@ class TicketDropdown(discord.ui.Select):
             discord.SelectOption(label="Recruitments", emoji="🧑‍✈️"),
             discord.SelectOption(label="Executive Team Support", emoji="⭐"),
             discord.SelectOption(label="PIREP Support", emoji="📋"),
-            discord.SelectOption(label="Route Support", emoji="🗺️")
+            discord.SelectOption(label="Route Support", emoji="🗺️"),
         ]
 
         super().__init__(
-            placeholder="Select ticket category...",
+            placeholder="Select a category to open a ticket",
             min_values=1,
             max_values=1,
             options=options,
@@ -39,16 +39,14 @@ class TicketDropdown(discord.ui.Select):
         guild = interaction.guild
         category = guild.get_channel(TICKET_CATEGORY_ID)
 
-        name = interaction.user.name.lower().replace(" ", "-")
+        username = interaction.user.name.lower().replace(" ", "-")
+        ticket_name = f"ticket-{username}"
 
-        channel = discord.utils.get(
-            category.text_channels,
-            name=f"ticket-{name}"
-        )
+        existing = discord.utils.get(category.text_channels, name=ticket_name)
 
-        if channel:
+        if existing:
             await interaction.response.send_message(
-                f"You already have a ticket: {channel.mention}",
+                f"You already have a ticket: {existing.mention}",
                 ephemeral=True
             )
             return
@@ -60,31 +58,27 @@ class TicketDropdown(discord.ui.Select):
         }
 
         channel = await guild.create_text_channel(
-            name=f"ticket-{name}",
+            name=ticket_name,
             category=category,
             overwrites=overwrites
         )
 
-        role_ping = None
-        label = self.values[0]
+        role_ping = GENERAL_ROLE
 
-        if label == "General Support":
-            role_ping = GENERAL_ROLE
-        elif label == "Recruitments":
+        if self.values[0] == "Recruitments":
             role_ping = RECRUIT_ROLE
-        elif label == "Executive Team Support":
+        elif self.values[0] == "Executive Team Support":
             role_ping = EXEC_ROLE
-        elif label == "PIREP Support":
+        elif self.values[0] == "PIREP Support":
             role_ping = PIREP_ROLE
-        elif label == "Route Support":
+        elif self.values[0] == "Route Support":
             role_ping = ROUTE_ROLE
 
         embed = discord.Embed(
             title="🎫 Support Ticket",
             description=(
-                f"Hello {interaction.user.mention},\n\n"
-                f"Our support team will assist you shortly.\n"
-                f"Please describe your issue clearly."
+                f"Welcome {interaction.user.mention}!\n\n"
+                "Please explain your issue and a staff member will assist you shortly."
             ),
             color=discord.Color.orange()
         )
@@ -96,6 +90,16 @@ class TicketDropdown(discord.ui.Select):
             embed=embed,
             view=view
         )
+
+        log = guild.get_channel(LOG_CHANNEL_ID)
+
+        log_embed = discord.Embed(
+            title="Ticket Created",
+            description=f"{interaction.user.mention} opened {channel.mention}",
+            color=discord.Color.green()
+        )
+
+        await log.send(embed=log_embed)
 
         await interaction.response.send_message(
             f"✅ Ticket created: {channel.mention}",
@@ -115,28 +119,25 @@ class TicketControls(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Claim", style=discord.ButtonStyle.green, custom_id="claim_ticket")
+    @discord.ui.button(label="Claim", style=discord.ButtonStyle.green, custom_id="ticket_claim")
     async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         if STAFF_ROLE not in [r.id for r in interaction.user.roles]:
-            await interaction.response.send_message(
-                "Only staff can claim tickets.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("Only staff can claim tickets.", ephemeral=True)
             return
 
-        await interaction.response.send_message(
-            f"✅ Ticket claimed by {interaction.user.mention}"
+        embed = discord.Embed(
+            description=f"👨‍✈️ Ticket claimed by {interaction.user.mention}",
+            color=discord.Color.green()
         )
 
-    @discord.ui.button(label="Close", style=discord.ButtonStyle.red, custom_id="close_ticket")
+        await interaction.response.send_message(embed=embed)
+
+    @discord.ui.button(label="Close", style=discord.ButtonStyle.red, custom_id="ticket_close")
     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         if STAFF_ROLE not in [r.id for r in interaction.user.roles]:
-            await interaction.response.send_message(
-                "Only staff can close tickets.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("Only staff can close tickets.", ephemeral=True)
             return
 
         embed = discord.Embed(
@@ -156,14 +157,17 @@ class TicketCloseControls(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Reopen", style=discord.ButtonStyle.green, custom_id="reopen_ticket")
+    @discord.ui.button(label="Reopen", style=discord.ButtonStyle.green, custom_id="ticket_reopen")
     async def reopen(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        await interaction.response.send_message(
-            "✅ Ticket reopened."
+        embed = discord.Embed(
+            description="🔓 Ticket reopened.",
+            color=discord.Color.green()
         )
 
-    @discord.ui.button(label="Delete", style=discord.ButtonStyle.red, custom_id="delete_ticket")
+        await interaction.response.send_message(embed=embed)
+
+    @discord.ui.button(label="Delete", style=discord.ButtonStyle.red, custom_id="ticket_delete")
     async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         await interaction.response.send_message("Deleting ticket...")
@@ -176,20 +180,40 @@ class Tickets(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="ticketpanel", description="Send ticket panel")
-    async def ticketpanel(self, interaction: discord.Interaction):
+    async def ticketpanel(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+        image: str | None = None
+    ):
 
         embed = discord.Embed(
-            title="Akasa Air Virtual Support Center",
+            title="Welcome to the Akasa Air Virtual Support Center!",
             description=(
-                "Need assistance with any Akasa Air service?\n\n"
-                "Select a category below to create a ticket."
+                "Need assistance with any Akasa Air service? You're in the right place!\n"
+                "Our dedicated <@&1389824693388837035> is here to help you quickly and efficiently.\n\n"
+                "**Please select a category below to create a ticket:**\n\n"
+                "• General Support\n"
+                "• Recruitments\n"
+                "• Executive Team Support\n"
+                "• PIREP Support\n"
+                "• Route Support\n\n"
+                "We’re committed to making your journey with Akasa Air smooth and stress-free! 🌍✈️"
             ),
             color=discord.Color.orange()
         )
 
+        if image:
+            embed.set_image(url=image)
+
         view = TicketPanel()
 
-        await interaction.response.send_message(embed=embed, view=view)
+        await channel.send(embed=embed, view=view)
+
+        await interaction.response.send_message(
+            "✅ Ticket panel sent.",
+            ephemeral=True
+        )
 
 
 async def setup(bot):
