@@ -21,7 +21,7 @@ class EmbedModal(discord.ui.Modal, title="Edit Embed"):
     async def on_submit(self, interaction: discord.Interaction):
 
         embed = discord.Embed(
-            title=self.title_input.value if self.title_input.value else None,
+            title=self.title_input.value or None,
             description=self.description_input.value,
             color=discord.Color.orange()
         )
@@ -41,17 +41,20 @@ class EmbedModal(discord.ui.Modal, title="Edit Embed"):
 
         self.view.embed = embed
 
-        # ✅ FIXED INTERACTION
         await interaction.response.defer()
 
         try:
-            await interaction.message.edit(
-                content="✅ Preview updated",
-                embed=embed,
-                view=self.view
-            )
-        except:
-            await interaction.followup.send("⚠️ Failed to update preview.", ephemeral=True)
+            if self.view.message:
+                await self.view.message.edit(
+                    content="🧪 Preview",
+                    embed=embed,
+                    view=self.view
+                )
+            else:
+                await interaction.followup.send("⚠️ Preview message not found.", ephemeral=True)
+
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 
 # ================= FIELD MODAL =================
@@ -101,13 +104,14 @@ class ButtonModal(discord.ui.Modal, title="Add Button"):
 class EmbedView(discord.ui.View):
 
     def __init__(self, author):
-        super().__init__(timeout=600)  # 10 min safe timeout
+        super().__init__(timeout=600)
         self.author = author
         self.embed = None
         self.channel = None
         self.fields = []
         self.buttons = []
         self.role_ping = None
+        self.message = None  # ✅ important fix
 
     def build_buttons(self):
         view = discord.ui.View()
@@ -220,6 +224,9 @@ class EmbedBuilder(commands.Cog):
             view=view,
             ephemeral=True
         )
+
+        # ✅ CRITICAL FIX (store message)
+        view.message = await interaction.original_response()
 
 
 async def setup(bot):
