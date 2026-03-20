@@ -15,6 +15,12 @@ bot = commands.Bot(
     intents=intents
 )
 
+from cogs.embed_builder_ui import EmbedView
+
+@bot.event
+async def on_ready():
+    bot.add_view(EmbedView(None))
+
 # Load all cogs automatically
 async def load_cogs():
     for file in os.listdir("./cogs"):
