@@ -24,12 +24,13 @@ class Welcome(commands.Cog):
         embed = discord.Embed(
             title="✈️ Welcome Aboard!",
             description=(
-                f"Welcome {member.mention} to **Akasa Air Virtual**!\n\n"
-                "We're excited to have you join our airline.\n"
-                "Please read the rules and start your journey with us!\n\n"
-                "🧑‍✈️ Join flights\n"
-                "📋 Submit PIREPs\n"
-                "🗺️ Explore routes\n\n"
+                f"✈️ Welcome {member.mention} to **Akasa Air Virtual**!\n\n"
+"We're thrilled to have you join our airline community. Get ready to explore new routes, fly with fellow pilots, and build your aviation journey with us.\n\n"
+"Before you begin, please take a moment to get set up:\n\n"
+"🔹 Open a ticket here: ⁠#📬・open a ticket\n"
+"🔹 Read our rules: ⁠#📒・rules\n"
+"🔹 Review important info: ⁠#📌・important-info\n\n"
+"Once you're ready, check available routes and start flying. We wish you a great experience and smooth flights ahead! 🛫"
                 f"You are member **#{member.guild.member_count}** 🎉"
             ),
             color=discord.Color.orange()
