@@ -35,17 +35,23 @@ class EmbedModal(discord.ui.Modal, title="Edit Embed"):
         if self.footer_input.value:
             embed.set_footer(text=self.footer_input.value)
 
-        # Add fields if exist
+        # Add fields
         for field in self.view.fields:
             embed.add_field(name=field["name"], value=field["value"], inline=False)
 
         self.view.embed = embed
 
-        await interaction.response.edit_message(
-            content="✅ Preview updated",
-            embed=embed,
-            view=self.view
-        )
+        # ✅ FIXED INTERACTION
+        await interaction.response.defer()
+
+        try:
+            await interaction.message.edit(
+                content="✅ Preview updated",
+                embed=embed,
+                view=self.view
+            )
+        except:
+            await interaction.followup.send("⚠️ Failed to update preview.", ephemeral=True)
 
 
 # ================= FIELD MODAL =================
@@ -90,12 +96,12 @@ class ButtonModal(discord.ui.Modal, title="Add Button"):
         await interaction.response.send_message("✅ Button added!", ephemeral=True)
 
 
-# ================= VIEW =================
+# ================= MAIN VIEW =================
 
 class EmbedView(discord.ui.View):
 
     def __init__(self, author):
-        super().__init__(timeout=None)
+        super().__init__(timeout=600)  # 10 min safe timeout
         self.author = author
         self.embed = None
         self.channel = None
@@ -105,17 +111,15 @@ class EmbedView(discord.ui.View):
 
     def build_buttons(self):
         view = discord.ui.View()
-
         for b in self.buttons:
             view.add_item(discord.ui.Button(label=b["label"], url=b["url"]))
-
         return view
 
     # EDIT
     @discord.ui.button(label="✏️ Edit", style=discord.ButtonStyle.primary)
     async def edit(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        if interaction.user != self.author:
+        if self.author and interaction.user != self.author:
             return await interaction.response.send_message("❌ Not your panel", ephemeral=True)
 
         await interaction.response.send_modal(EmbedModal(self))
@@ -124,7 +128,7 @@ class EmbedView(discord.ui.View):
     @discord.ui.button(label="➕ Field", style=discord.ButtonStyle.secondary)
     async def add_field(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        if interaction.user != self.author:
+        if self.author and interaction.user != self.author:
             return await interaction.response.send_message("❌ Not your panel", ephemeral=True)
 
         await interaction.response.send_modal(FieldModal(self))
@@ -133,7 +137,7 @@ class EmbedView(discord.ui.View):
     @discord.ui.button(label="🔘 Button", style=discord.ButtonStyle.secondary)
     async def add_button(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        if interaction.user != self.author:
+        if self.author and interaction.user != self.author:
             return await interaction.response.send_message("❌ Not your panel", ephemeral=True)
 
         await interaction.response.send_modal(ButtonModal(self))
@@ -142,13 +146,17 @@ class EmbedView(discord.ui.View):
     @discord.ui.button(label="📢 Ping Role", style=discord.ButtonStyle.secondary)
     async def ping_role(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        if interaction.user != self.author:
+        if self.author and interaction.user != self.author:
             return await interaction.response.send_message("❌ Not your panel", ephemeral=True)
 
         self.role_ping = interaction.user.top_role
-        await interaction.response.send_message(f"✅ Will ping {self.role_ping.mention}", ephemeral=True)
 
-    # SELECT CHANNEL
+        await interaction.response.send_message(
+            f"✅ Will ping {self.role_ping.mention}",
+            ephemeral=True
+        )
+
+    # CHANNEL SELECT
     @discord.ui.select(
         placeholder="Select channel...",
         cls=discord.ui.ChannelSelect,
@@ -156,8 +164,8 @@ class EmbedView(discord.ui.View):
     )
     async def select_channel(self, interaction: discord.Interaction, select):
 
-        if interaction.user != self.author:
-            return await interaction.response.send_message("❌ Not yours", ephemeral=True)
+        if self.author and interaction.user != self.author:
+            return await interaction.response.send_message("❌ Not your panel", ephemeral=True)
 
         self.channel = select.values[0]
 
@@ -170,11 +178,14 @@ class EmbedView(discord.ui.View):
     @discord.ui.button(label="📤 Send", style=discord.ButtonStyle.success)
     async def send(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        if interaction.user != self.author:
-            return await interaction.response.send_message("❌ Not yours", ephemeral=True)
+        if self.author and interaction.user != self.author:
+            return await interaction.response.send_message("❌ Not your panel", ephemeral=True)
 
         if not self.embed or not self.channel:
-            return await interaction.response.send_message("⚠️ Create embed & select channel", ephemeral=True)
+            return await interaction.response.send_message(
+                "⚠️ Create embed & select channel first.",
+                ephemeral=True
+            )
 
         content = self.role_ping.mention if self.role_ping else None
 
