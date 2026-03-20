@@ -118,7 +118,6 @@ class EmbedView(discord.ui.View):
     async def edit(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.author and interaction.user != self.author:
             return await interaction.response.send_message("❌ Not your panel", ephemeral=True)
-
         await interaction.response.send_modal(EmbedModal(self))
 
     # ADD FIELD
@@ -126,7 +125,6 @@ class EmbedView(discord.ui.View):
     async def add_field(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.author and interaction.user != self.author:
             return await interaction.response.send_message("❌ Not your panel", ephemeral=True)
-
         await interaction.response.send_modal(FieldModal(self))
 
     # ADD BUTTON
@@ -134,7 +132,6 @@ class EmbedView(discord.ui.View):
     async def add_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.author and interaction.user != self.author:
             return await interaction.response.send_message("❌ Not your panel", ephemeral=True)
-
         await interaction.response.send_modal(ButtonModal(self))
 
     # ROLE SELECT
@@ -156,12 +153,9 @@ class EmbedView(discord.ui.View):
             )
         else:
             self.role_ping = None
-            await interaction.response.send_message(
-                "❌ Role cleared.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Role cleared.", ephemeral=True)
 
-    # CHANNEL SELECT
+    # CHANNEL SELECT (FIXED)
     @discord.ui.select(
         placeholder="Select channel...",
         cls=discord.ui.ChannelSelect,
@@ -171,7 +165,8 @@ class EmbedView(discord.ui.View):
         if self.author and interaction.user != self.author:
             return await interaction.response.send_message("❌ Not your panel", ephemeral=True)
 
-        self.channel = select.values[0]
+        channel_obj = select.values[0]
+        self.channel = interaction.guild.get_channel(channel_obj.id)
 
         await interaction.response.send_message(
             f"📍 Channel set: {self.channel.mention}",
@@ -188,6 +183,12 @@ class EmbedView(discord.ui.View):
         if not self.embed or not self.channel:
             return await interaction.response.send_message(
                 "⚠️ Create embed & select channel first.",
+                ephemeral=True
+            )
+
+        if not isinstance(self.channel, discord.TextChannel):
+            return await interaction.response.send_message(
+                "❌ Invalid channel selected.",
                 ephemeral=True
             )
 
