@@ -5,6 +5,7 @@ import json
 import os
 
 DATA_FILE = "callsigns.json"
+STAFF_ROLE_ID = 1389824693388837035  # 🔁 your staff role ID
 
 
 # ================= DATA =================
@@ -21,6 +22,10 @@ def save_data(data):
         json.dump(data, f, indent=4)
 
 
+def is_staff(member: discord.Member):
+    return any(role.id == STAFF_ROLE_ID for role in member.roles)
+
+
 # ================= COG =================
 
 class Callsign(commands.Cog):
@@ -28,92 +33,53 @@ class Callsign(commands.Cog):
         self.bot = bot
 
     # 🔍 CHECK CALLSIGN
-    @app_commands.command(name="check_callsign", description="Check if a callsign is available")
+    @app_commands.command(name="check_callsign", description="Check callsign availability")
     async def check_callsign(self, interaction: discord.Interaction, number: int):
 
-        if number < 1 or number > 999:
-            return await interaction.response.send_message("❌ Use number between 1–999", ephemeral=True)
+        if not is_staff(interaction.user):
+            return await interaction.response.send_message("❌ Staff only", ephemeral=True)
 
-        callsign = f"{number:03}QP"
+        if number < 100 or number > 999:
+            return await interaction.response.send_message("❌ Use 100–999", ephemeral=True)
+
+        callsign = f"{number}QP"
         data = load_data()
 
-        owner = data.get(callsign)
-
-        embed = discord.Embed(color=discord.Color.orange())
-
-        if owner:
-            embed.title = "❌ Callsign Unavailable"
-            embed.description = f"✈️ **{callsign}** is already taken.\n👤 Owner: <@{owner}>"
-        else:
-            embed.title = "✅ Callsign Available"
-            embed.description = f"✈️ **{callsign}** is available!"
-
-        await interaction.response.send_message(embed=embed)
-
-    # 🎟️ CLAIM
-    @app_commands.command(name="claim_callsign", description="Claim a callsign")
-    async def claim_callsign(self, interaction: discord.Interaction, number: int):
-
-        if number < 1 or number > 999:
-            return await interaction.response.send_message("❌ Use 1–999", ephemeral=True)
-
-        callsign = f"{number:03}QP"
-        data = load_data()
-
-        # Check if already taken
         if callsign in data:
-            return await interaction.response.send_message("❌ Callsign already taken.", ephemeral=True)
+            await interaction.response.send_message(
+                f"❌ {callsign} is TAKEN (User: <@{data[callsign]}>)"
+            )
+        else:
+            await interaction.response.send_message(
+                f"✅ {callsign} is AVAILABLE"
+            )
 
-        # Check if user already has one
-        for cs, uid in data.items():
-            if uid == interaction.user.id:
-                return await interaction.response.send_message(
-                    f"⚠️ You already own **{cs}**",
-                    ephemeral=True
-                )
+    # 📋 FULL LIST
+    @app_commands.command(name="callsign_list", description="Show all callsigns (100–999)")
+    async def callsign_list(self, interaction: discord.Interaction):
 
-        # Assign
-        data[callsign] = interaction.user.id
-        save_data(data)
-
-        embed = discord.Embed(
-            title="🎉 Callsign Assigned",
-            description=f"You now own ✈️ **{callsign}**",
-            color=discord.Color.green()
-        )
-
-        await interaction.response.send_message(embed=embed)
-
-    # ❌ RELEASE
-    @app_commands.command(name="release_callsign", description="Release your callsign")
-    async def release_callsign(self, interaction: discord.Interaction):
+        if not is_staff(interaction.user):
+            return await interaction.response.send_message("❌ Staff only", ephemeral=True)
 
         data = load_data()
 
-        for cs, uid in list(data.items()):
-            if uid == interaction.user.id:
-                del data[cs]
-                save_data(data)
+        lines = []
+        for i in range(100, 1000):
+            cs = f"{i}QP"
+            if cs in data:
+                lines.append(f"{cs} - TAKEN")
+            else:
+                lines.append(f"{cs} - AVAILABLE")
 
-                return await interaction.response.send_message(
-                    f"❌ Released **{cs}**"
-                )
+        # Discord limit fix (split messages)
+        chunk_size = 50
+        chunks = [lines[i:i+chunk_size] for i in range(0, len(lines), chunk_size)]
 
-        await interaction.response.send_message("⚠️ You don't have a callsign.", ephemeral=True)
+        await interaction.response.send_message("📋 Callsign List (Part 1)")
 
-    # 👤 MY CALLSIGN
-    @app_commands.command(name="my_callsign", description="View your callsign")
-    async def my_callsign(self, interaction: discord.Interaction):
-
-        data = load_data()
-
-        for cs, uid in data.items():
-            if uid == interaction.user.id:
-                return await interaction.response.send_message(
-                    f"✈️ Your callsign: **{cs}**"
-                )
-
-        await interaction.response.send_message("⚠️ You don't have a callsign.", ephemeral=True)
+        for idx, chunk in enumerate(chunks):
+            text = "\n".join(chunk)
+            await interaction.followup.send(f"**Part {idx+1}:**\n{text}")
 
 
 async def setup(bot):
