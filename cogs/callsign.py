@@ -12,6 +12,8 @@ STAFF_ROLE_ID = 1389824693388837035  # 🔁 your staff role ID
 
 def load_data():
     if not os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "w") as f:
+            f.write("{}")
         return {}
     with open(DATA_FILE, "r") as f:
         return json.load(f)
@@ -22,7 +24,7 @@ def save_data(data):
         json.dump(data, f, indent=4)
 
 
-def is_staff(member: discord.Member):
+def is_staff(member):
     return any(role.id == STAFF_ROLE_ID for role in member.roles)
 
 
@@ -33,8 +35,59 @@ class Callsign(commands.Cog):
         self.bot = bot
 
     # 🔍 CHECK CALLSIGN
-    @app_commands.command(name="check_callsign", description="Check callsign availability")
+    @app_commands.command(name="check_callsign")
     async def check_callsign(self, interaction: discord.Interaction, number: int):
+
+        if number < 100 or number > 999:
+            return await interaction.response.send_message("❌ Use 100–999", ephemeral=True)
+
+        cs = f"{number}QP"
+        data = load_data()
+
+        if cs in data:
+            await interaction.response.send_message(f"❌ {cs} is TAKEN (<@{data[cs]}>)")
+        else:
+            await interaction.response.send_message(f"✅ {cs} is AVAILABLE")
+
+    # 📋 CALLSIGN LIST (WITH RANGE)
+    @app_commands.command(name="callsign_list")
+    async def callsign_list(
+        self,
+        interaction: discord.Interaction,
+        start: int,
+        end: int
+    ):
+
+        if not is_staff(interaction.user):
+            return await interaction.response.send_message("❌ Staff only", ephemeral=True)
+
+        if start < 100 or end > 999 or start > end:
+            return await interaction.response.send_message("❌ Use valid range (100–999)", ephemeral=True)
+
+        data = load_data()
+        lines = []
+
+        for i in range(start, end + 1):
+            cs = f"{i}QP"
+            status = "TAKEN" if cs in data else "AVAILABLE"
+            lines.append(f"{cs} - {status}")
+
+        # Split messages
+        chunks = [lines[i:i+50] for i in range(0, len(lines), 50)]
+
+        await interaction.response.send_message(f"📋 Callsigns {start}-{end}")
+
+        for idx, chunk in enumerate(chunks):
+            await interaction.followup.send(f"Part {idx+1}:\n" + "\n".join(chunk))
+
+    # 🛠️ ASSIGN CALLSIGN
+    @app_commands.command(name="assign_callsign")
+    async def assign_callsign(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        number: int
+    ):
 
         if not is_staff(interaction.user):
             return await interaction.response.send_message("❌ Staff only", ephemeral=True)
@@ -42,44 +95,57 @@ class Callsign(commands.Cog):
         if number < 100 or number > 999:
             return await interaction.response.send_message("❌ Use 100–999", ephemeral=True)
 
-        callsign = f"{number}QP"
+        cs = f"{number}QP"
         data = load_data()
 
-        if callsign in data:
-            await interaction.response.send_message(
-                f"❌ {callsign} is TAKEN (User: <@{data[callsign]}>)"
-            )
-        else:
-            await interaction.response.send_message(
-                f"✅ {callsign} is AVAILABLE"
-            )
+        if cs in data:
+            return await interaction.response.send_message(f"❌ {cs} already taken")
 
-    # 📋 FULL LIST
-    @app_commands.command(name="callsign_list", description="Show all callsigns (100–999)")
-    async def callsign_list(self, interaction: discord.Interaction):
+        for k, v in data.items():
+            if v == member.id:
+                return await interaction.response.send_message(f"⚠️ {member.mention} already has {k}")
+
+        # Save
+        data[cs] = member.id
+        save_data(data)
+
+        # Update nickname
+        try:
+            await member.edit(nick=f"{member.name} | {cs}")
+        except Exception as e:
+            print(f"Nickname error: {e}")
+
+        await interaction.response.send_message(f"✅ Assigned {cs} to {member.mention}")
+
+    # ❌ REMOVE CALLSIGN
+    @app_commands.command(name="remove_callsign")
+    async def remove_callsign(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member
+    ):
 
         if not is_staff(interaction.user):
             return await interaction.response.send_message("❌ Staff only", ephemeral=True)
 
         data = load_data()
 
-        lines = []
-        for i in range(100, 1000):
-            cs = f"{i}QP"
-            if cs in data:
-                lines.append(f"{cs} - TAKEN")
-            else:
-                lines.append(f"{cs} - AVAILABLE")
+        for cs, uid in list(data.items()):
+            if uid == member.id:
+                del data[cs]
+                save_data(data)
 
-        # Discord limit fix (split messages)
-        chunk_size = 50
-        chunks = [lines[i:i+chunk_size] for i in range(0, len(lines), chunk_size)]
+                # Reset nickname
+                try:
+                    await member.edit(nick=None)
+                except Exception as e:
+                    print(f"Nickname reset error: {e}")
 
-        await interaction.response.send_message("📋 Callsign List (Part 1)")
+                return await interaction.response.send_message(
+                    f"❌ Removed {cs} from {member.mention}"
+                )
 
-        for idx, chunk in enumerate(chunks):
-            text = "\n".join(chunk)
-            await interaction.followup.send(f"**Part {idx+1}:**\n{text}")
+        await interaction.response.send_message(f"⚠️ {member.mention} has no callsign")
 
 
 async def setup(bot):
