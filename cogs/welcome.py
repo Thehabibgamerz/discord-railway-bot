@@ -2,7 +2,8 @@ import discord
 from discord.ext import commands
 
 WELCOME_CHANNEL_ID = 1389838941414232214  # 🔁 your channel ID
-WELCOME_ROLE_ID = None  # optional role ping
+WELCOME_ROLE_ID = None  # optional ping role
+RECRUIT_ROLE_ID = 1389877024406896762  # 🔁 ADD YOUR RECRUIT ROLE ID HERE
 
 
 class Welcome(commands.Cog):
@@ -12,6 +13,16 @@ class Welcome(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
+
+        # 🔹 AUTO ASSIGN RECRUIT ROLE
+        recruit_role = member.guild.get_role(RECRUIT_ROLE_ID)
+        if recruit_role:
+            try:
+                await member.add_roles(recruit_role)
+            except Exception as e:
+                print(f"❌ Failed to assign recruit role: {e}")
+        else:
+            print("❌ Recruit role not found")
 
         # Get channel
         channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
