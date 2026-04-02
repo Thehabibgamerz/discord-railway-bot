@@ -2,17 +2,21 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from discord.ui import View, Button, Modal, TextInput
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
 import re
 
 STAFF_ROLE_ID = 1389824693388837035  # Change to your staff role ID
 
+# ✅ IST Timezone
+IST = timezone(timedelta(hours=5, minutes=30))
 
-# 🔹 Natural-language datetime parser
+
+# ================= PARSER =================
+
 def parse_datetime(input_str: str):
     input_str = input_str.strip().lower()
-    now = datetime.utcnow()
+    now = datetime.now(IST)
 
     # in Xh Ym
     match = re.match(r"in (\d+)h(?: ?(\d+)m)?", input_str)
@@ -26,19 +30,21 @@ def parse_datetime(input_str: str):
     if match:
         hour = int(match.group(1))
         minute = int(match.group(2))
-        dt = datetime(now.year, now.month, now.day, hour, minute) + timedelta(days=1)
+        dt = datetime(now.year, now.month, now.day, hour, minute, tzinfo=IST) + timedelta(days=1)
         return dt
 
-    # standard formats
+    # standard formats (assumed IST)
     formats = [
         "%Y-%m-%d %H:%M",
         "%d/%m/%Y %H:%M",
         "%Y-%m-%d %I:%M %p",
         "%d/%m/%Y %I:%M %p"
     ]
+
     for fmt in formats:
         try:
-            return datetime.strptime(input_str, fmt)
+            dt = datetime.strptime(input_str, fmt)
+            return dt.replace(tzinfo=IST)
         except:
             continue
 
@@ -62,10 +68,12 @@ class EventButtons(View):
         # Attendees
         unique_users = list(dict.fromkeys(self.attendees))
         attending_text = "\n".join([u.mention for u in unique_users]) if unique_users else "No attendees yet"
+
         embed.set_field_at(1, name="Attending", value=attending_text, inline=False)
 
-        # 🔥 Timestamp (AUTO TIMEZONE)
-        timestamp = int(self.event_time.timestamp())
+        # ✅ IST → UTC → Timestamp
+        timestamp = int(self.event_time.astimezone(timezone.utc).timestamp())
+
         embed.set_field_at(
             0,
             name="🕒 Event Time",
@@ -77,7 +85,7 @@ class EventButtons(View):
 
         await self.embed_msg.edit(embed=embed, view=self)
 
-    # ✅ JOIN
+    # JOIN
     @discord.ui.button(label="I'm Attending", emoji="✅", style=discord.ButtonStyle.success)
     async def attend(self, interaction: discord.Interaction, button: Button):
         if self.locked:
@@ -89,7 +97,7 @@ class EventButtons(View):
         await self.update_embed()
         await interaction.response.send_message("You joined the event.", ephemeral=True)
 
-    # ❌ LEAVE
+    # LEAVE
     @discord.ui.button(label="Remove Me", emoji="❌", style=discord.ButtonStyle.danger)
     async def remove(self, interaction: discord.Interaction, button: Button):
         if interaction.user in self.attendees:
@@ -98,7 +106,7 @@ class EventButtons(View):
         await self.update_embed()
         await interaction.response.send_message("You left the event.", ephemeral=True)
 
-    # ✏️ EDIT
+    # EDIT
     @discord.ui.button(label="Edit Event", emoji="✏️", style=discord.ButtonStyle.secondary)
     async def edit_event(self, interaction: discord.Interaction, button: Button):
         if not any(role.id == STAFF_ROLE_ID for role in interaction.user.roles):
@@ -122,7 +130,7 @@ class EventEditModal(Modal):
             required=False
         )
         self.time_input = TextInput(
-            label="Datetime",
+            label="Datetime (IST)",
             default=view.event_time.strftime("%Y-%m-%d %H:%M"),
             required=False
         )
@@ -157,16 +165,7 @@ class Event(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="createevent", description="Create PRO Event with timestamps")
-    @app_commands.describe(
-        title="Event title",
-        datetime="Datetime (e.g., 'tomorrow 12:00', 'in 2h30m', 'YYYY-MM-DD HH:MM')",
-        description="Event description",
-        channel="Channel to post event",
-        on_create_mentions="Role to mention on creation (optional)",
-        on_start_mentions="Role to mention on start (optional)",
-        image="Optional banner image"
-    )
+    @app_commands.command(name="createevent", description="Create PRO Event (IST → Auto timezone)")
     async def createevent(
         self,
         interaction: discord.Interaction,
@@ -187,7 +186,8 @@ class Event(commands.Cog):
                 ephemeral=True
             )
 
-        timestamp = int(dt.timestamp())
+        # ✅ Convert IST → UTC timestamp
+        timestamp = int(dt.astimezone(timezone.utc).timestamp())
 
         embed = discord.Embed(
             title=f"🎉 {title}",
@@ -225,10 +225,10 @@ class Event(commands.Cog):
             ephemeral=True
         )
 
-        # 🔔 Wait until event starts
+        # Wait for event start
         while True:
-            now = datetime.utcnow()
-            if now >= dt:
+            now = datetime.now(timezone.utc)
+            if now >= dt.astimezone(timezone.utc):
                 break
             await asyncio.sleep(30)
 
