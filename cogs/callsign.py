@@ -5,7 +5,7 @@ import json
 import os
 
 DATA_FILE = "callsigns.json"
-STAFF_ROLE_ID = 1389824693388837035  # 🔁 your staff role ID
+STAFF_ROLE_ID = 1389824693388837035
 
 
 # ================= DATA =================
@@ -51,12 +51,7 @@ class Callsign(commands.Cog):
 
     # 📋 CALLSIGN LIST (WITH RANGE)
     @app_commands.command(name="callsign_list")
-    async def callsign_list(
-        self,
-        interaction: discord.Interaction,
-        start: int,
-        end: int
-    ):
+    async def callsign_list(self, interaction: discord.Interaction, start: int, end: int):
 
         if not is_staff(interaction.user):
             return await interaction.response.send_message("❌ Staff only", ephemeral=True)
@@ -72,7 +67,6 @@ class Callsign(commands.Cog):
             status = "TAKEN" if cs in data else "AVAILABLE"
             lines.append(f"{cs} - {status}")
 
-        # Split messages
         chunks = [lines[i:i+50] for i in range(0, len(lines), 50)]
 
         await interaction.response.send_message(f"📋 Callsigns {start}-{end}")
@@ -82,12 +76,7 @@ class Callsign(commands.Cog):
 
     # 🛠️ ASSIGN CALLSIGN
     @app_commands.command(name="assign_callsign")
-    async def assign_callsign(
-        self,
-        interaction: discord.Interaction,
-        member: discord.Member,
-        number: int
-    ):
+    async def assign_callsign(self, interaction: discord.Interaction, member: discord.Member, number: int):
 
         if not is_staff(interaction.user):
             return await interaction.response.send_message("❌ Staff only", ephemeral=True)
@@ -105,25 +94,14 @@ class Callsign(commands.Cog):
             if v == member.id:
                 return await interaction.response.send_message(f"⚠️ {member.mention} already has {k}")
 
-        # Save
         data[cs] = member.id
         save_data(data)
-
-        # Update nickname
-        try:
-            await member.edit(nick=f"{member.name} | {cs}")
-        except Exception as e:
-            print(f"Nickname error: {e}")
 
         await interaction.response.send_message(f"✅ Assigned {cs} to {member.mention}")
 
     # ❌ REMOVE CALLSIGN
     @app_commands.command(name="remove_callsign")
-    async def remove_callsign(
-        self,
-        interaction: discord.Interaction,
-        member: discord.Member
-    ):
+    async def remove_callsign(self, interaction: discord.Interaction, member: discord.Member):
 
         if not is_staff(interaction.user):
             return await interaction.response.send_message("❌ Staff only", ephemeral=True)
@@ -134,12 +112,6 @@ class Callsign(commands.Cog):
             if uid == member.id:
                 del data[cs]
                 save_data(data)
-
-                # Reset nickname
-                try:
-                    await member.edit(nick=None)
-                except Exception as e:
-                    print(f"Nickname reset error: {e}")
 
                 return await interaction.response.send_message(
                     f"❌ Removed {cs} from {member.mention}"
