@@ -8,7 +8,7 @@ import os
 IF_API_KEY = os.getenv("IF_API_KEY")
 BASE_URL = "https://api.infiniteflight.com/public/v2"
 
-IFATC_ROLE_ID = 123456789012345678  # 🔁 replace
+IFATC_ROLE_ID = 1389833550957641840  # 🔁 replace
 
 verified_users = set()  # simple memory storage
 
