@@ -85,7 +85,7 @@ class ATCLive(commands.Cog):
             )
 
         embed.set_footer(
-            text="Powered by Infinite Flight Live API"
+            text="AkasaAirVirtual"
         )
 
         await interaction.followup.send(embed=embed)
