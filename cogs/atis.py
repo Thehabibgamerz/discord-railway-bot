@@ -102,10 +102,10 @@ class ATIS(commands.Cog):
                 # Step 4: Send embed
                 embed = discord.Embed(
                     title=f"ATIS for {airport} — {server_choice}",
-                    description=f"📡 {result_text}",
+                    description=f"📡 `{result_text}`",
                     color=discord.Color.green()
                 )
-                embed.set_footer(text="Data provided by Infinite Flight Live API")
+                embed.set_footer(text="AkasaAirVirtual")
                 await select_interaction.response.send_message(embed=embed)
 
         # Step 0: Send dropdown view
