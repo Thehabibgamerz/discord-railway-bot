@@ -103,7 +103,7 @@ class ATIS(commands.Cog):
                 embed = discord.Embed(
                     title=f"ATIS for {airport} — {server_choice}",
                     description=f"📡 `{result_text}`",
-                    color=discord.Color.green()
+                    color=discord.Color.orange()
                 )
                 embed.set_footer(text="AkasaAirVirtual")
                 await select_interaction.response.send_message(embed=embed)
