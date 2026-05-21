@@ -4,7 +4,8 @@ from discord import app_commands
 import aiohttp
 import os
 
-# Use environment variable for security on Railway
+# ================= CONFIG =================
+
 IF_API_KEY = os.getenv("IF_API_KEY")
 BASE_URL = "https://api.infiniteflight.com/public/v2"
 
@@ -14,109 +15,263 @@ SERVER_MAP = {
     "Expert": "expert"
 }
 
+# ==========================================
+
+
 class ATIS(commands.Cog):
+
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="atis", description="Get live ATIS info for an airport on Infinite Flight")
-    @app_commands.describe(airport="Airport ICAO code")
-    async def atis(self, interaction: discord.Interaction, airport: str):
+    # ================= GET SESSION =================
+
+    async def get_session_id(self, server_key):
+
+        async with aiohttp.ClientSession() as session:
+
+            async with session.get(
+                f"{BASE_URL}/sessions?apikey={IF_API_KEY}"
+            ) as resp:
+
+                if resp.status != 200:
+                    return None
+
+                data = await resp.json()
+
+                for s in data.get("result", []):
+
+                    if server_key.lower() in s.get("name", "").lower():
+                        return s.get("id")
+
+        return None
+
+    # ================= MAIN COMMAND =================
+
+    @app_commands.command(
+        name="atis",
+        description="Get live airport information"
+    )
+    @app_commands.describe(
+        airport="Airport ICAO Code"
+    )
+    async def atis(
+        self,
+        interaction: discord.Interaction,
+        airport: str
+    ):
+
         airport = airport.upper()
 
-        # Dropdown for server selection
+        # ================= SERVER SELECT =================
+
         class ServerSelect(discord.ui.Select):
-            def __init__(self):
+
+            def __init__(self, cog):
+
+                self.cog = cog
+
                 options = [
-                    discord.SelectOption(label="Casual", description="Casual Server"),
-                    discord.SelectOption(label="Training", description="Training Server"),
-                    discord.SelectOption(label="Expert", description="Expert Server")
+                    discord.SelectOption(
+                        label="Casual",
+                        emoji="🟢"
+                    ),
+                    discord.SelectOption(
+                        label="Training",
+                        emoji="🟡"
+                    ),
+                    discord.SelectOption(
+                        label="Expert",
+                        emoji="🔴"
+                    )
                 ]
-                super().__init__(placeholder="Select a server...", min_values=1, max_values=1, options=options)
+
+                super().__init__(
+                    placeholder="Select Infinite Flight Server",
+                    min_values=1,
+                    max_values=1,
+                    options=options,
+                    custom_id="atis_server_select"
+                )
 
             async def callback(self, select_interaction: discord.Interaction):
+
+                await select_interaction.response.defer(ephemeral=True)
+
                 server_choice = self.values[0]
                 server_key = SERVER_MAP[server_choice]
 
-                # Step 1: Fetch active sessions
-                async with aiohttp.ClientSession() as session:
-                    try:
-                        async with session.get(f"{BASE_URL}/sessions?apikey={IF_API_KEY}") as resp:
-                            if resp.status == 401:
-                                await select_interaction.response.send_message(
-                                    "❌ Invalid API key! Please check your Infinite Flight API key.", ephemeral=True
-                                )
-                                return
-                            elif resp.status != 200:
-                                await select_interaction.response.send_message(
-                                    f"⚠️ Failed to fetch sessions (HTTP {resp.status})", ephemeral=True
-                                )
-                                return
-                            sessions_data = await resp.json()
-                    except Exception as e:
-                        await select_interaction.response.send_message(f"❌ Error fetching sessions: {e}", ephemeral=True)
-                        return
+                # ================= GET SESSION =================
 
-                # Step 2: Find session ID
-                sessions = sessions_data.get("result", [])
-                session_id = None
-                for s in sessions:
-                    if server_key.lower() in s.get("name", "").lower():
-                        session_id = s.get("id")
-                        break
+                session_id = await self.cog.get_session_id(server_key)
 
                 if not session_id:
-                    await select_interaction.response.send_message(
-                        f"⚠️ No active {server_choice} session found.", ephemeral=True
+                    return await select_interaction.followup.send(
+                        "❌ Failed to get server session.",
+                        ephemeral=True
                     )
-                    return
 
-                # Step 3: Fetch ATIS
+                # ================= FETCH ATIS =================
+
+                atis_url = (
+                    f"{BASE_URL}/sessions/"
+                    f"{session_id}/airport/"
+                    f"{airport}/atis?apikey={IF_API_KEY}"
+                )
+
+                # ================= FETCH AIRPORT STATUS =================
+
+                airport_url = (
+                    f"{BASE_URL}/sessions/"
+                    f"{session_id}/airport/{airport}"
+                    f"?apikey={IF_API_KEY}"
+                )
+
                 async with aiohttp.ClientSession() as session:
-                    url = f"{BASE_URL}/sessions/{session_id}/airport/{airport}/atis?apikey={IF_API_KEY}"
+
+                    # ---------- ATIS ----------
+
                     try:
-                        async with session.get(url) as resp:
-                            if resp.status == 401:
-                                await select_interaction.response.send_message(
-                                    "❌ Invalid API key! Cannot fetch ATIS.", ephemeral=True
+
+                        async with session.get(atis_url) as resp:
+
+                            if resp.status != 200:
+
+                                return await select_interaction.followup.send(
+                                    f"❌ Failed to fetch ATIS.\nHTTP {resp.status}",
+                                    ephemeral=True
                                 )
-                                return
-                            elif resp.status != 200:
-                                await select_interaction.response.send_message(
-                                    f"⚠️ Failed to fetch ATIS (HTTP {resp.status})", ephemeral=True
-                                )
-                                return
+
                             atis_data = await resp.json()
+
                     except Exception as e:
-                        await select_interaction.response.send_message(f"❌ Error fetching ATIS: {e}", ephemeral=True)
-                        return
 
-                error_code = atis_data.get("errorCode")
-                result_text = atis_data.get("result")
+                        return await select_interaction.followup.send(
+                            f"❌ API Error:\n{e}",
+                            ephemeral=True
+                        )
 
-                if error_code != 0 or not result_text:
-                    await select_interaction.response.send_message(
-                        f"⚠️ No active ATIS available for {airport} on {server_choice}.", ephemeral=True
+                    # ---------- AIRPORT INFO ----------
+
+                    try:
+
+                        async with session.get(airport_url) as resp:
+
+                            airport_data = await resp.json()
+
+                    except:
+                        airport_data = {}
+
+                # ================= PARSE DATA =================
+
+                atis_text = atis_data.get("result")
+
+                if not atis_text:
+
+                    atis_text = "No active ATIS available."
+
+                result = airport_data.get("result", {})
+
+                inbound = result.get("inboundFlightsCount", "Unknown")
+                outbound = result.get("outboundFlightsCount", "Unknown")
+
+                atc_freqs = []
+
+                for freq in result.get("frequencies", []):
+
+                    freq_type = freq.get("type", "Unknown")
+                    value = freq.get("frequencyMHz", "N/A")
+
+                    atc_freqs.append(
+                        f"• {freq_type}: {value}"
                     )
-                    return
 
-                # Step 4: Send embed
+                freq_text = (
+                    "\n".join(atc_freqs)
+                    if atc_freqs else
+                    "No active ATC"
+                )
+
+                # ================= EMBED =================
+
                 embed = discord.Embed(
-                    title=f"ATIS for {airport} — {server_choice}",
-                    description=f"📡 ```{result_text}```",
+                    title=f"📡 {airport} Airport Information",
                     color=discord.Color.orange()
                 )
-                embed.set_footer(text="AkasaAirVirtual")
-                await select_interaction.response.send_message(embed=embed)
 
-        # Step 0: Send dropdown view
-        view = discord.ui.View()
-        view.add_item(ServerSelect())
+                embed.add_field(
+                    name="🌐 Server",
+                    value=server_choice,
+                    inline=True
+                )
+
+                embed.add_field(
+                    name="🛬 Inbound Flights",
+                    value=str(inbound),
+                    inline=True
+                )
+
+                embed.add_field(
+                    name="🛫 Outbound Flights",
+                    value=str(outbound),
+                    inline=True
+                )
+
+                embed.add_field(
+                    name="🎧 Active Frequencies",
+                    value=freq_text,
+                    inline=False
+                )
+
+                embed.add_field(
+                    name="📡 ATIS",
+                    value=f"```{atis_text[:1000]}```",
+                    inline=False
+                )
+
+                embed.set_footer(
+                    text="Akasa Air Virtual • Infinite Flight"
+                )
+
+                await select_interaction.followup.send(
+                    embed=embed,
+                    ephemeral=True
+                )
+
+        # ================= VIEW =================
+
+        class ServerView(discord.ui.View):
+
+            def __init__(self, cog):
+
+                super().__init__(timeout=120)
+
+                self.add_item(ServerSelect(cog))
+
+        # ================= SEND PANEL =================
+
+        embed = discord.Embed(
+            title="📡 Infinite Flight ATIS",
+            description=(
+                f"Select a server below to view live airport "
+                f"information for **{airport}**.\n\n"
+                f"Includes:\n"
+                f"• Live ATIS\n"
+                f"• Active ATC Frequencies\n"
+                f"• Inbound Flights\n"
+                f"• Outbound Flights\n"
+                f"• Airport Status"
+            ),
+            color=discord.Color.orange()
+        )
+
         await interaction.response.send_message(
-            f"Select the server for ATIS at {airport}:", view=view, ephemeral=True
+            embed=embed,
+            view=ServerView(self),
+            ephemeral=True
         )
 
 
-# Mandatory setup function
+# ================= SETUP =================
+
 async def setup(bot):
     await bot.add_cog(ATIS(bot))
-    
