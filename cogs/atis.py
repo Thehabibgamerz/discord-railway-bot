@@ -7,6 +7,7 @@ import os
 # ================= CONFIG =================
 
 IF_API_KEY = os.getenv("IF_API_KEY")
+
 BASE_URL = "https://api.infiniteflight.com/public/v2"
 
 SERVER_MAP = {
@@ -45,11 +46,11 @@ class ATIS(commands.Cog):
 
         return None
 
-    # ================= MAIN COMMAND =================
+    # ================= COMMAND =================
 
     @app_commands.command(
         name="atis",
-        description="Get live airport information"
+        description="Get live airport information from Infinite Flight"
     )
     @app_commands.describe(
         airport="Airport ICAO Code"
@@ -95,7 +96,7 @@ class ATIS(commands.Cog):
 
             async def callback(self, select_interaction: discord.Interaction):
 
-                await select_interaction.response.defer(ephemeral=True)
+                await select_interaction.response.defer()
 
                 server_choice = self.values[0]
                 server_key = SERVER_MAP[server_choice]
@@ -106,114 +107,111 @@ class ATIS(commands.Cog):
 
                 if not session_id:
                     return await select_interaction.followup.send(
-                        "❌ Failed to get server session.",
-                        ephemeral=True
+                        "❌ Failed to get session ID."
                     )
 
-                # ================= FETCH ATIS =================
+                # ================= URLS =================
 
                 atis_url = (
                     f"{BASE_URL}/sessions/"
-                    f"{session_id}/airport/"
-                    f"{airport}/atis?apikey={IF_API_KEY}"
+                    f"{session_id}/airport/{airport}/atis"
+                    f"?apikey={IF_API_KEY}"
                 )
 
-                # ================= FETCH AIRPORT STATUS =================
-
-                airport_url = (
+                status_url = (
                     f"{BASE_URL}/sessions/"
-                    f"{session_id}/airport/{airport}"
+                    f"{session_id}/airport/{airport}/status"
                     f"?apikey={IF_API_KEY}"
                 )
 
                 async with aiohttp.ClientSession() as session:
 
-                    # ---------- ATIS ----------
+                    # ---------- FETCH ATIS ----------
 
                     try:
 
                         async with session.get(atis_url) as resp:
-
-                            if resp.status != 200:
-
-                                return await select_interaction.followup.send(
-                                    f"❌ Failed to fetch ATIS.\nHTTP {resp.status}",
-                                    ephemeral=True
-                                )
 
                             atis_data = await resp.json()
 
                     except Exception as e:
 
                         return await select_interaction.followup.send(
-                            f"❌ API Error:\n{e}",
-                            ephemeral=True
+                            f"❌ Failed to fetch ATIS.\n{e}"
                         )
 
-                    # ---------- AIRPORT INFO ----------
+                    # ---------- FETCH STATUS ----------
 
                     try:
 
-                        async with session.get(airport_url) as resp:
+                        async with session.get(status_url) as resp:
 
-                            airport_data = await resp.json()
+                            status_data = await resp.json()
 
-                    except:
-                        airport_data = {}
+                    except Exception as e:
+
+                        return await select_interaction.followup.send(
+                            f"❌ Failed to fetch airport status.\n{e}"
+                        )
 
                 # ================= PARSE DATA =================
 
                 atis_text = atis_data.get("result")
 
                 if not atis_text:
-
                     atis_text = "No active ATIS available."
 
-                result = airport_data.get("result", {})
+                result = status_data.get("result", {})
 
-                inbound = result.get("inboundFlightsCount", "Unknown")
-                outbound = result.get("outboundFlightsCount", "Unknown")
+                inbound = result.get("inboundFlightsCount", 0)
+                outbound = result.get("outboundFlightsCount", 0)
 
-                atc_freqs = []
+                # ================= ACTIVE ATC =================
 
-                for freq in result.get("frequencies", []):
+                frequencies = result.get("frequencies", [])
 
-                    freq_type = freq.get("type", "Unknown")
-                    value = freq.get("frequencyMHz", "N/A")
+                freq_lines = []
+                controller_lines = []
 
-                    atc_freqs.append(
-                        f"• {freq_type}: {value}"
-                    )
+                if frequencies:
 
-                freq_text = (
-                    "\n".join(atc_freqs)
-                    if atc_freqs else
-                    "No active ATC"
-                )
+                    for freq in frequencies:
+
+                        freq_type = freq.get("type", "Unknown")
+                        freq_mhz = freq.get("frequencyMHz", "N/A")
+
+                        # Controller name
+                        controller = freq.get("username")
+
+                        if not controller:
+                            controller = "Unknown Controller"
+
+                        freq_lines.append(
+                            f"• {freq_type} — {freq_mhz}"
+                        )
+
+                        controller_lines.append(
+                            f"• {freq_type}: {controller}"
+                        )
+
+                    freq_text = "\n".join(freq_lines)
+                    controller_text = "\n".join(controller_lines)
+
+                else:
+
+                    freq_text = "No active ATC"
+                    controller_text = "No active controllers"
 
                 # ================= EMBED =================
 
                 embed = discord.Embed(
                     title=f"📡 {airport} Airport Information",
+                    description=(
+                        f"🌐 **Server:** {server_choice}\n"
+                        f"🛬 **Inbound Flights:** {inbound}\n"
+                        f"🛫 **Outbound Flights:** {outbound}"
+                    ),
                     color=discord.Color.orange()
-                )
-
-                embed.add_field(
-                    name="🌐 Server",
-                    value=server_choice,
-                    inline=True
-                )
-
-                embed.add_field(
-                    name="🛬 Inbound Flights",
-                    value=str(inbound),
-                    inline=True
-                )
-
-                embed.add_field(
-                    name="🛫 Outbound Flights",
-                    value=str(outbound),
-                    inline=True
                 )
 
                 embed.add_field(
@@ -223,7 +221,13 @@ class ATIS(commands.Cog):
                 )
 
                 embed.add_field(
-                    name="📡 ATIS",
+                    name="👨‍✈️ Active Controllers",
+                    value=controller_text,
+                    inline=False
+                )
+
+                embed.add_field(
+                    name="📡 Live ATIS",
                     value=f"```{atis_text[:1000]}```",
                     inline=False
                 )
@@ -232,9 +236,11 @@ class ATIS(commands.Cog):
                     text="Akasa Air Virtual • Infinite Flight"
                 )
 
+                # ================= PUBLIC MESSAGE =================
+
                 await select_interaction.followup.send(
                     embed=embed,
-                    ephemeral=True
+                    ephemeral=False
                 )
 
         # ================= VIEW =================
@@ -247,7 +253,7 @@ class ATIS(commands.Cog):
 
                 self.add_item(ServerSelect(cog))
 
-        # ================= SEND PANEL =================
+        # ================= MAIN PANEL =================
 
         embed = discord.Embed(
             title="📡 Infinite Flight ATIS",
@@ -257,11 +263,15 @@ class ATIS(commands.Cog):
                 f"Includes:\n"
                 f"• Live ATIS\n"
                 f"• Active ATC Frequencies\n"
+                f"• Controller Names\n"
                 f"• Inbound Flights\n"
-                f"• Outbound Flights\n"
-                f"• Airport Status"
+                f"• Outbound Flights"
             ),
             color=discord.Color.orange()
+        )
+
+        embed.set_footer(
+            text="Akasa Air Virtual"
         )
 
         await interaction.response.send_message(
