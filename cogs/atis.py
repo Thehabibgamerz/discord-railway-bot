@@ -22,7 +22,7 @@ class ATIS(commands.Cog):
 
     @app_commands.command(
         name="atis",
-        description="Get live airport information"
+        description="Get live airport info from Infinite Flight"
     )
     @app_commands.describe(
         airport="Airport ICAO code"
@@ -80,7 +80,7 @@ class ATIS(commands.Cog):
                     async with aiohttp.ClientSession() as session:
 
                         # =============================
-                        # FETCH SESSIONS
+                        # GET SESSIONS
                         # =============================
 
                         async with session.get(
@@ -111,7 +111,7 @@ class ATIS(commands.Cog):
                             )
 
                         # =============================
-                        # FETCH WORLD DATA
+                        # GET WORLD DATA
                         # =============================
 
                         async with session.get(
@@ -126,14 +126,13 @@ class ATIS(commands.Cog):
 
                             world_data = await resp.json()
 
-                        # API returns LIST directly
                         airports = world_data.get("result", [])
 
                         airport_data = None
 
                         for a in airports:
 
-                            if a.get("icao", "").upper() == airport:
+                            if a.get("airportIcao", "").upper() == airport:
                                 airport_data = a
                                 break
 
@@ -147,12 +146,12 @@ class ATIS(commands.Cog):
                         # =============================
 
                         inbound = airport_data.get(
-                            "inboundFlightsCount",
+                            "inboundFlights",
                             0
                         )
 
                         outbound = airport_data.get(
-                            "outboundFlightsCount",
+                            "outboundFlights",
                             0
                         )
 
@@ -212,7 +211,7 @@ class ATIS(commands.Cog):
                         )
 
                         # =============================
-                        # FETCH ATIS
+                        # GET ATIS
                         # =============================
 
                         atis_text = "No active ATIS"
@@ -243,7 +242,8 @@ class ATIS(commands.Cog):
                         )
 
                         embed.description = (
-                            f"🌐 **Server:** {server_choice}\n"
+                            f"🌐 **Server:** {server_choice}\n\n"
+
                             f"🛬 **Inbound Flights:** {inbound}\n"
                             f"🛫 **Outbound Flights:** {outbound}\n\n"
 
@@ -261,6 +261,7 @@ class ATIS(commands.Cog):
                             text="Akasa Air Virtual • Infinite Flight"
                         )
 
+                        # PUBLIC MESSAGE
                         await select_interaction.followup.send(
                             embed=embed
                         )
@@ -271,16 +272,13 @@ class ATIS(commands.Cog):
                         f"❌ API Error:\n```{e}```"
                     )
 
-        # =============================
-        # VIEW
-        # =============================
-
         class ServerView(discord.ui.View):
 
             def __init__(self):
                 super().__init__(timeout=120)
                 self.add_item(ServerSelect())
 
+        # ONLY SERVER SELECT IS EPHEMERAL
         await interaction.response.send_message(
             f"Select a server for `{airport}`",
             view=ServerView(),
