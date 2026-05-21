@@ -6,7 +6,7 @@ from datetime import timedelta
 # ================= CONFIG =================
 
 STAFF_ROLE_ID = 1389824693388837035  # Staff Role ID
-LOG_CHANNEL_ID = 1389842003906265098  # Optional moderation logs channel
+LOG_CHANNEL_ID = 1506970182680182805  # Optional moderation logs channel
 
 # ==========================================
 
