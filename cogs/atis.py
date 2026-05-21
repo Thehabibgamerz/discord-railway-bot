@@ -4,8 +4,6 @@ from discord import app_commands
 import aiohttp
 import os
 
-# ================= CONFIG =================
-
 IF_API_KEY = os.getenv("IF_API_KEY")
 
 BASE_URL = "https://api.infiniteflight.com/public/v2"
@@ -16,21 +14,15 @@ SERVER_MAP = {
     "Expert": "expert"
 }
 
-# ================= COG =================
 
 class ATIS(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
 
-    # ================= COMMAND =================
-
     @app_commands.command(
         name="atis",
-        description="Get live airport information from Infinite Flight"
-    )
-    @app_commands.describe(
-        airport="Airport ICAO code"
+        description="Get live airport info"
     )
     async def atis(
         self,
@@ -40,34 +32,18 @@ class ATIS(commands.Cog):
 
         airport = airport.upper()
 
-        # ================= SERVER SELECT =================
-
         class ServerSelect(discord.ui.Select):
 
             def __init__(self):
 
                 options = [
-                    discord.SelectOption(
-                        label="Casual",
-                        emoji="🟢",
-                        description="Casual Server"
-                    ),
-                    discord.SelectOption(
-                        label="Training",
-                        emoji="🟡",
-                        description="Training Server"
-                    ),
-                    discord.SelectOption(
-                        label="Expert",
-                        emoji="🔴",
-                        description="Expert Server"
-                    )
+                    discord.SelectOption(label="Casual", emoji="🟢"),
+                    discord.SelectOption(label="Training", emoji="🟡"),
+                    discord.SelectOption(label="Expert", emoji="🔴")
                 ]
 
                 super().__init__(
-                    placeholder="Select a server...",
-                    min_values=1,
-                    max_values=1,
+                    placeholder="Select server...",
                     options=options
                 )
 
@@ -75,12 +51,12 @@ class ATIS(commands.Cog):
 
                 await select_interaction.response.defer()
 
-                server_choice = self.values[0]
-                server_key = SERVER_MAP[server_choice]
-
                 headers = {
                     "Authorization": f"Bearer {IF_API_KEY}"
                 }
+
+                server_choice = self.values[0]
+                server_key = SERVER_MAP[server_choice]
 
                 try:
 
@@ -93,69 +69,65 @@ class ATIS(commands.Cog):
                             headers=headers
                         ) as resp:
 
-                            if resp.status != 200:
-                                return await select_interaction.followup.send(
-                                    f"❌ Failed to fetch sessions ({resp.status})"
-                                )
+                            data = await resp.json()
 
-                            if resp.content_type != "application/json":
-                                text = await resp.text()
-                                return await select_interaction.followup.send(
-                                    f"❌ Invalid API response\n```{text[:1000]}```"
-                                )
-
-                            sessions_data = await resp.json()
-
-                        # ================= FIND SESSION =================
+                        sessions = data.get("result", [])
 
                         session_id = None
 
-                        for s in sessions_data.get("result", []):
+                        for s in sessions:
 
-                            if server_key.lower() in s.get("name", "").lower():
-                                session_id = s.get("id")
+                            if server_key.lower() in s["name"].lower():
+                                session_id = s["id"]
                                 break
 
                         if not session_id:
                             return await select_interaction.followup.send(
-                                "❌ Server session not found."
+                                "❌ Session not found"
                             )
 
-                        # ================= AIRPORT DATA =================
-
-                        airport_url = (
-                            f"{BASE_URL}/sessions/"
-                            f"{session_id}/airport/{airport}"
-                        )
+                        # ================= WORLD DATA =================
 
                         async with session.get(
-                            airport_url,
+                            f"{BASE_URL}/sessions/{session_id}/world",
                             headers=headers
                         ) as resp:
 
-                            if resp.status != 200:
-                                return await select_interaction.followup.send(
-                                    f"❌ Failed to fetch airport info ({resp.status})"
-                                )
+                            world_data = await resp.json()
 
-                            if resp.content_type != "application/json":
-                                text = await resp.text()
-                                return await select_interaction.followup.send(
-                                    f"❌ Invalid airport response\n```{text[:1000]}```"
-                                )
+                        result = world_data.get("result", {})
 
-                            airport_data = await resp.json()
+                        airports = result.get("airports", [])
 
-                        result = airport_data.get("result", {})
+                        airport_data = None
 
-                        # ================= FLIGHTS =================
+                        for a in airports:
 
-                        inbound = result.get("inboundFlightsCount", "Unknown")
-                        outbound = result.get("outboundFlightsCount", "Unknown")
+                            if a.get("icao", "").upper() == airport:
+                                airport_data = a
+                                break
+
+                        if not airport_data:
+                            return await select_interaction.followup.send(
+                                f"❌ Airport `{airport}` not found on {server_choice}"
+                            )
+
+                        inbound = airport_data.get(
+                            "inboundFlightsCount",
+                            0
+                        )
+
+                        outbound = airport_data.get(
+                            "outboundFlightsCount",
+                            0
+                        )
+
+                        frequencies = airport_data.get(
+                            "frequencies",
+                            []
+                        )
 
                         # ================= FREQUENCIES =================
-
-                        frequencies = result.get("frequencies", [])
 
                         freq_text = ""
 
@@ -163,8 +135,15 @@ class ATIS(commands.Cog):
 
                             for freq in frequencies:
 
-                                freq_name = freq.get("type", "Unknown")
-                                freq_value = freq.get("frequency", "Unknown")
+                                freq_name = freq.get(
+                                    "type",
+                                    "Unknown"
+                                )
+
+                                freq_value = freq.get(
+                                    "frequency",
+                                    "Unknown"
+                                )
 
                                 freq_text += (
                                     f"• {freq_name}: {freq_value}\n"
@@ -175,54 +154,42 @@ class ATIS(commands.Cog):
 
                         # ================= CONTROLLERS =================
 
-                        controllers_text = ""
+                        controllers = []
 
-                        if frequencies:
+                        for freq in frequencies:
 
-                            controller_lines = []
+                            username = freq.get("username")
 
-                            for freq in frequencies:
+                            if username:
+                                controllers.append(
+                                    f"• {username}"
+                                )
 
-                                controller = freq.get("username")
-
-                                if controller:
-                                    controller_lines.append(
-                                        f"• {controller}"
-                                    )
-
-                            if controller_lines:
-                                controllers_text = "\n".join(controller_lines)
-                            else:
-                                controllers_text = "No active controllers"
-
-                        else:
-                            controllers_text = "No active controllers"
+                        controllers_text = (
+                            "\n".join(controllers)
+                            if controllers
+                            else "No active controllers"
+                        )
 
                         # ================= ATIS =================
 
-                        atis_url = (
-                            f"{BASE_URL}/sessions/"
-                            f"{session_id}/airport/{airport}/atis"
-                        )
+                        atis_text = "No active ATIS"
 
                         async with session.get(
-                            atis_url,
+                            f"{BASE_URL}/sessions/{session_id}/airport/{airport}/atis",
                             headers=headers
                         ) as resp:
 
-                            atis_text = "No active ATIS"
-
                             if resp.status == 200:
 
-                                if resp.content_type == "application/json":
+                                atis_data = await resp.json()
 
-                                    atis_data = await resp.json()
+                                if atis_data.get("errorCode") == 0:
 
-                                    if atis_data.get("errorCode") == 0:
-                                        atis_text = atis_data.get(
-                                            "result",
-                                            "No active ATIS"
-                                        )
+                                    atis_text = atis_data.get(
+                                        "result",
+                                        "No active ATIS"
+                                    )
 
                         # ================= EMBED =================
 
@@ -237,7 +204,7 @@ class ATIS(commands.Cog):
                             f"🛫 **Outbound Flights:** {outbound}\n\n"
 
                             f"🎧 **Active Frequencies**\n"
-                            f"{freq_text}\n\n"
+                            f"{freq_text}\n"
 
                             f"👨‍✈️ **Active Controllers**\n"
                             f"{controllers_text}\n\n"
@@ -260,15 +227,11 @@ class ATIS(commands.Cog):
                         f"❌ API Error:\n```{e}```"
                     )
 
-        # ================= VIEW =================
-
         class ServerView(discord.ui.View):
 
             def __init__(self):
                 super().__init__(timeout=120)
                 self.add_item(ServerSelect())
-
-        # ================= SEND =================
 
         await interaction.response.send_message(
             f"Select a server for `{airport}`",
@@ -276,8 +239,6 @@ class ATIS(commands.Cog):
             ephemeral=True
         )
 
-
-# ================= SETUP =================
 
 async def setup(bot):
     await bot.add_cog(ATIS(bot))
