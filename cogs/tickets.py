@@ -149,7 +149,7 @@ class TicketDropdown(discord.ui.Select):
             inline=False    
         )    
     
-        embed.set_thumbnail(url=interaction.user.display_avatar.url)    
+        # ❌ REMOVED PROFILE PICTURE
     
         embed.set_footer(    
             text=f"Ticket ID: {channel.id}",    
@@ -246,7 +246,7 @@ class TicketControls(discord.ui.View):
                 ephemeral=True    
             )    
     
-        # LOCK TICKET
+        # LOCK TICKET (VIEW ONLY)
         if interaction.channel.topic:
             try:
                 owner_id = int(
@@ -261,8 +261,10 @@ class TicketControls(discord.ui.View):
                 if owner:
                     await interaction.channel.set_permissions(
                         owner,
+                        view_channel=True,
                         send_messages=False,
-                        add_reactions=False
+                        add_reactions=False,
+                        read_message_history=True
                     )
 
             except:
@@ -319,6 +321,7 @@ class TicketCloseControls(discord.ui.View):
                 if owner:
                     await interaction.channel.set_permissions(
                         owner,
+                        view_channel=True,
                         send_messages=True,
                         add_reactions=True,
                         attach_files=True,
