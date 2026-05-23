@@ -227,91 +227,28 @@ class TicketControls(discord.ui.View):
     
         await interaction.response.send_message(embed=embed)    
     
-   # CLOSE BUTTON    
-@discord.ui.button(    
-    label="Close",    
-    emoji="🔒",    
-    style=discord.ButtonStyle.red,    
-    custom_id="ticket_close"    
-)    
-async def close(    
-    self,    
-    interaction: discord.Interaction,    
-    button: discord.ui.Button    
-):    
-    
-    if not is_staff(interaction.user):    
-        return await interaction.response.send_message(    
-            "❌ Only staff members can close tickets.",    
-            ephemeral=True    
-        )    
-
-    # GET TICKET OWNER
-    owner_id = None
-
-    if interaction.channel.topic:
-        try:
-            owner_id = int(
-                interaction.channel.topic.replace(
-                    "Ticket Owner: ",
-                    ""
-                )
-            )
-        except:
-            pass
-
-    # LOCK CHANNEL
-    if owner_id:
-        owner = interaction.guild.get_member(owner_id)
-
-        if owner:
-            await interaction.channel.set_permissions(
-                owner,
-                view_channel=True,
-                send_messages=False,
-                add_reactions=False,
-                attach_files=False,
-                embed_links=False,
-                read_message_history=True
-            )
-
-    embed = discord.Embed(    
-        title="🔒 Ticket Closed",    
-        description=(    
-            "This ticket has been closed.\n\n"    
-            "You may reopen it if further assistance is required "    
-            "or permanently delete it."    
-        ),    
-        color=discord.Color.red()    
-    )    
-    
-    await interaction.response.send_message(    
-        embed=embed,    
-        view=TicketCloseControls()    
-    )
-    
-    
-# ================= CLOSE CONTROLS =================    
-    
-class TicketCloseControls(discord.ui.View):    
-    
-    def __init__(self):    
-        super().__init__(timeout=None)    
-    
-    # REOPEN    
+    # CLOSE BUTTON    
     @discord.ui.button(    
-        label="Reopen",    
-        emoji="🔓",    
-        style=discord.ButtonStyle.green,    
-        custom_id="ticket_reopen"    
+        label="Close",    
+        emoji="🔒",    
+        style=discord.ButtonStyle.red,    
+        custom_id="ticket_close"    
     )    
-    async def reopen(    
+    async def close(    
         self,    
         interaction: discord.Interaction,    
         button: discord.ui.Button    
-    ):
+    ):    
+    
+        if not is_staff(interaction.user):    
+            return await interaction.response.send_message(    
+                "❌ Only staff members can close tickets.",    
+                ephemeral=True    
+            )    
+    
+        # GET TICKET OWNER
+        owner_id = None
 
-        # REOPEN TICKET
         if interaction.channel.topic:
             try:
                 owner_id = int(
@@ -320,58 +257,39 @@ class TicketCloseControls(discord.ui.View):
                         ""
                     )
                 )
-
-                owner = interaction.guild.get_member(owner_id)
-
-                if owner:
-                    await interaction.channel.set_permissions(
-                        owner,
-                        view_channel=True,
-                        send_messages=True,
-                        add_reactions=True,
-                        attach_files=True,
-                        embed_links=True,
-                        read_message_history=True
-                    )
-
             except:
                 pass
-    
+
+        # LOCK CHANNEL
+        if owner_id:
+            owner = interaction.guild.get_member(owner_id)
+
+            if owner:
+                await interaction.channel.set_permissions(
+                    owner,
+                    view_channel=True,
+                    send_messages=False,
+                    add_reactions=False,
+                    attach_files=False,
+                    embed_links=False,
+                    read_message_history=True
+                )
+
         embed = discord.Embed(    
-            description="✅ Ticket reopened successfully.",    
-            color=discord.Color.green()    
+            title="🔒 Ticket Closed",    
+            description=(    
+                "This ticket has been closed.\n\n"    
+                "You may reopen it if further assistance is required "    
+                "or permanently delete it."    
+            ),    
+            color=discord.Color.red()    
         )    
     
-        await interaction.response.send_message(embed=embed)    
-    
-    # DELETE    
-    @discord.ui.button(    
-        label="Delete",    
-        emoji="🗑️",    
-        style=discord.ButtonStyle.red,    
-        custom_id="ticket_delete"    
-    )    
-    async def delete(    
-        self,    
-        interaction: discord.Interaction,    
-        button: discord.ui.Button    
-    ):    
-    
-        if not is_staff(interaction.user):    
-            return await interaction.response.send_message(    
-                "❌ Only staff members can delete tickets.",    
-                ephemeral=True    
-            )    
-    
         await interaction.response.send_message(    
-            "🗑️ Deleting ticket in 1 minute..."    
+            embed=embed,    
+            view=TicketCloseControls()    
         )
-
-        await asyncio.sleep(60)
-    
-        await interaction.channel.delete()    
-    
-    
+                 
 # ================= COG =================    
     
 class Tickets(commands.Cog):    
