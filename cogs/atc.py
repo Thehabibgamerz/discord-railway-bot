@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import aiohttp
 import os
+from datetime import datetime, timezone
 
 # Use environment variable for security on Railway
 IF_API_KEY = os.getenv("IF_API_KEY")
@@ -81,29 +82,72 @@ class AirportSelect(discord.ui.Select):
             )
             return
 
+        # Rebuild the full airport list (for the dropdown to remain usable after this)
+        airport_counts = {}
+        for c in atc_list:
+            icao = c.get("airportName")
+            if icao:
+                airport_counts[icao] = airport_counts.get(icao, 0) + 1
+        airports = sorted(airport_counts.items(), key=lambda x: x[0])
+
         embed = discord.Embed(
-            title=f"🎙️ Active ATC — {airport}",
-            description=f"Server: **{self.server_choice}**",
+            title=f"🎙️ Live Infinite Flight {self.server_choice} Server Air Traffic Control",
+            description=f"Airport ICAO Code: **{airport}**",
             color=discord.Color.blue()
         )
+
+        map_lat, map_lng = None, None
 
         for c in controllers:
             facility = FACILITY_TYPES.get(c.get("type"), f"Type {c.get('type')}")
             username = c.get("username", "Unknown")
-            vo = c.get("virtualOrganization")
 
-            value = f"**Controller:** {username}"
-            if vo:
-                value += f"\n**VO:** {vo}"
+            lines = [f"**Controller:** {username}"]
+
+            start_time_raw = c.get("startTime")
+            if start_time_raw:
+                try:
+                    start_dt = datetime.fromisoformat(start_time_raw.replace("Z", "+00:00"))
+                    epoch = int(start_dt.timestamp())
+                    elapsed = datetime.now(timezone.utc) - start_dt
+                    hours, remainder = divmod(int(elapsed.total_seconds()), 3600)
+                    minutes = remainder // 60
+
+                    lines.append(f"**Time of start:** <t:{epoch}:t>")
+                    lines.append(f"**Active For:** {hours} Hours and {minutes} Minutes")
+                except Exception:
+                    pass
+
+            if map_lat is None and c.get("latitude") is not None:
+                map_lat = c.get("latitude")
+                map_lng = c.get("longitude")
 
             embed.add_field(
                 name=f"📍 {facility}",
-                value=value,
-                inline=True
+                value="\n".join(lines),
+                inline=False
             )
 
+        embed.add_field(
+            name="\u200b",
+            value=f"Showing {len(controllers)}/{len(controllers)}",
+            inline=False
+        )
+
         embed.set_footer(text="AkasaAirVirtual • Infinite Flight Live")
-        await interaction.followup.send(embed=embed)
+
+        view = discord.ui.View(timeout=120)
+        if map_lat is not None and map_lng is not None:
+            view.add_item(
+                discord.ui.Button(
+                    label="View On Static Map",
+                    style=discord.ButtonStyle.link,
+                    url=f"https://www.google.com/maps?q={map_lat},{map_lng}"
+                )
+            )
+        view.add_item(AirportSelect(self.session_id, self.server_choice, airports))
+
+        await interaction.followup.send(embed=embed, view=view)
 
 
 class AirportSelectView(discord.ui.View):
