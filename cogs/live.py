@@ -27,15 +27,83 @@ async def fetch_json(session, url):
         return await resp.json(), resp.status
 
 
-class LiveFlightView(discord.ui.View):
-    """Lets the user page through multiple matching flights."""
+async def get_avatar_url(session, username: str):
+    """
+    Looks up a pilot's profile picture via the Infinite Flight Community
+    forum (Discourse) user API. Returns None if the user isn't found there
+    (e.g. username mismatch between IF and the forum, or private profile).
+    """
+    try:
+        url = f"https://community.infiniteflight.com/u/{username}.json"
+        data, status = await fetch_json(session, url)
+        if not data:
+            return None
+        avatar_template = data.get("user", {}).get("avatar_template")
+        if not avatar_template:
+            return None
+        # avatar_template looks like "/user_avatar/community.infiniteflight.com/<user>/{size}/12345_2.png"
+        avatar_path = avatar_template.replace("{size}", "256")
+        if avatar_path.startswith("//"):
+            return f"https:{avatar_path}"
+        if avatar_path.startswith("/"):
+            return f"https://community.infiniteflight.com{avatar_path}"
+        return avatar_path
+    except Exception:
+        return None
 
-    def __init__(self, session_id: str, matches: list, index: int = 0):
-        super().__init__(timeout=180)
+
+def build_route_map_url(items: list, current_lat, current_lon):
+    """
+    Builds a static map image URL showing the route line and the aircraft's
+    current position, using OpenStreetMap's free static map renderer
+    (no API key required).
+    """
+    coords = []
+    for i in items:
+        loc = i.get("location", {})
+        la, lo = loc.get("latitude"), loc.get("longitude")
+        if la is not None and lo is not None and (la, lo) != (0, 0):
+            coords.append((la, lo))
+
+    if not coords:
+        return None
+
+    # Limit points to keep the URL a reasonable length
+    if len(coords) > 60:
+        step = len(coords) // 60
+        coords = coords[::step]
+
+    path_points = "|".join(f"{la},{lo}" for la, lo in coords)
+    markers = f"{coords[0][0]},{coords[0][1]},lightblue1|{coords[-1][0]},{coords[-1][1]},lightblue2"
+
+    if current_lat is not None and current_lon is not None:
+        markers += f"|{current_lat},{current_lon},red-pin"
+
+    url = (
+        "https://staticmap.openstreetmap.de/staticmap.php"
+        f"?size=600x400&maptype=mapnik"
+        f"&path=color:0x0000ffaa|weight:3|{path_points}"
+        f"&markers={markers}"
+    )
+    return url
+
+
+class LiveFlightView(discord.ui.View):
+    """Lets the user page through multiple matching flights, and refresh live data."""
+
+    def __init__(self, session_id: str, matches: list, index: int = 0, query: str = ""):
+        super().__init__(timeout=300)
         self.session_id = session_id
         self.matches = matches
         self.index = index
-        self._update_buttons()
+        self.query = query
+
+        if len(matches) <= 1:
+            # No need for paging controls on a single result
+            self.remove_item(self.previous_button)
+            self.remove_item(self.next_button)
+        else:
+            self._update_buttons()
 
     def _update_buttons(self):
         self.previous_button.disabled = self.index <= 0
@@ -45,19 +113,63 @@ class LiveFlightView(discord.ui.View):
         flight = self.matches[self.index]
         return await build_flight_embed(self.session_id, flight, self.index, len(self.matches))
 
-    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.secondary, row=0)
     async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.index -= 1
         self._update_buttons()
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary, row=0)
     async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.index += 1
         self._update_buttons()
         embed = await self.build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.primary, row=1)
+    async def refresh_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+
+        # Re-fetch live flights to get current position/altitude/speed,
+        # then try to keep tracking the same flight by flightId
+        async with aiohttp.ClientSession() as session:
+            flights_data, status = await fetch_json(
+                session, f"{BASE_URL}/sessions/{self.session_id}/flights?apikey={IF_API_KEY}"
+            )
+
+        if not flights_data:
+            await interaction.followup.send(
+                f"⚠️ Failed to refresh flight data (HTTP {status})", ephemeral=True
+            )
+            return
+
+        flights = flights_data.get("result", [])
+        query_lower = self.query.lower()
+
+        new_matches = [
+            f for f in flights
+            if query_lower in (f.get("username") or "").lower()
+            or query_lower in (f.get("callsign") or "").lower()
+        ]
+
+        if not new_matches:
+            await interaction.followup.send(
+                "⚠️ This flight is no longer active.", ephemeral=True
+            )
+            return
+
+        self.matches = new_matches
+        self.index = min(self.index, len(self.matches) - 1)
+
+        if len(self.matches) <= 1:
+            self.remove_item(self.previous_button) if self.previous_button in self.children else None
+            self.remove_item(self.next_button) if self.next_button in self.children else None
+        else:
+            self._update_buttons()
+
+        embed = await self.build_embed()
+        await interaction.edit_original_response(embed=embed, view=self)
 
 
 async def build_flight_embed(session_id: str, flight: dict, index: int, total: int):
@@ -84,8 +196,13 @@ async def build_flight_embed(session_id: str, flight: dict, index: int, total: i
     eta_text = "N/A"
 
     debug_text = None
+    avatar_url = None
+    route_map_url = None
 
     async with aiohttp.ClientSession() as session:
+
+        # Profile picture lookup (Infinite Flight Community forum)
+        avatar_url = await get_avatar_url(session, username)
 
         # Aircraft / livery lookup
         try:
@@ -129,6 +246,7 @@ async def build_flight_embed(session_id: str, flight: dict, index: int, total: i
                         departure = waypoint_names[0]
                         arrival = waypoint_names[-1]
                         short_route = " ".join(waypoint_names)
+                        route_map_url = build_route_map_url(items, lat, lon)
 
                     # type (0=SID, 1=STAR, 2=Approach, 3=Track) is ONLY meaningful
                     # when "children" is populated — that marks a procedure item
@@ -173,6 +291,9 @@ async def build_flight_embed(session_id: str, flight: dict, index: int, total: i
         color=discord.Color.blue()
     )
 
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
+
     embed.add_field(
         name="✈️ Aircraft",
         value=f"**Type:** {aircraft_name}\n**Livery:** {livery_name}",
@@ -215,6 +336,9 @@ async def build_flight_embed(session_id: str, flight: dict, index: int, total: i
             value=debug_text[:1000],
             inline=False
         )
+
+    if route_map_url:
+        embed.set_image(url=route_map_url)
 
     embed.set_footer(text=f"Showing {index + 1}/{total} • AkasaAirVirtual • Infinite Flight Live")
 
@@ -278,12 +402,9 @@ class Live(commands.Cog):
             return
 
         embed = await build_flight_embed(session_id, matches[0], 0, len(matches))
-        view = LiveFlightView(session_id, matches, 0) if len(matches) > 1 else None
+        view = LiveFlightView(session_id, matches, 0, query=query)
 
-        if view:
-            await interaction.followup.send(embed=embed, view=view)
-        else:
-            await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, view=view)
 
 
 # Mandatory setup function
