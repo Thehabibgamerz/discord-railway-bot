@@ -15,15 +15,16 @@ SERVER_MAP = {
 }
 
 
-def parse_station(station_name: str):
-    """
-    Splits a stationName like 'EGLL_TWR' into ('EGLL', 'TWR').
-    Falls back gracefully if the format is unexpected.
-    """
-    if "_" in station_name:
-        icao, facility = station_name.split("_", 1)
-        return icao, facility
-    return station_name, "ATC"
+FACILITY_TYPES = {
+    0: "Ground",
+    1: "Tower",
+    2: "Unicom",
+    3: "Clearance",
+    4: "Approach",
+    5: "Departure",
+    6: "Center",
+    7: "ATIS"
+}
 
 
 class AirportSelect(discord.ui.Select):
@@ -71,7 +72,7 @@ class AirportSelect(discord.ui.Select):
         atc_list = atc_data.get("result", [])
         controllers = [
             c for c in atc_list
-            if parse_station(c.get("stationName", ""))[0] == airport
+            if c.get("airportName") == airport
         ]
 
         if not controllers:
@@ -87,18 +88,17 @@ class AirportSelect(discord.ui.Select):
         )
 
         for c in controllers:
-            station = c.get("stationName", "")
-            _, facility = parse_station(station)
+            facility = FACILITY_TYPES.get(c.get("type"), f"Type {c.get('type')}")
             username = c.get("username", "Unknown")
-            freq = c.get("frequency")
+            vo = c.get("virtualOrganization")
 
-            value_lines = [f"**Controller:** {username}"]
-            if freq:
-                value_lines.append(f"**Frequency:** {freq}")
+            value = f"**Controller:** {username}"
+            if vo:
+                value += f"\n**VO:** {vo}"
 
             embed.add_field(
                 name=f"📍 {facility}",
-                value="\n".join(value_lines),
+                value=value,
                 inline=True
             )
 
@@ -177,20 +177,15 @@ class ServerSelect(discord.ui.Select):
         atc_list = atc_data.get("result", [])
 
         if not atc_list:
-            # Debug aid: dump the raw response so we can see why it's empty
-            import json
-            raw_dump = json.dumps(atc_data, indent=2)[:1800]
             await interaction.followup.send(
-                f"⚠️ No active controllers on the {server_choice} server right now.\n"
-                f"```json\n{raw_dump}\n```",
-                ephemeral=True
+                f"⚠️ No active controllers on the {server_choice} server right now.", ephemeral=True
             )
             return
 
         # Count controllers per airport
         airport_counts = {}
         for c in atc_list:
-            icao, _ = parse_station(c.get("stationName", ""))
+            icao = c.get("airportName")
             if not icao:
                 continue
             airport_counts[icao] = airport_counts.get(icao, 0) + 1
@@ -198,12 +193,8 @@ class ServerSelect(discord.ui.Select):
         airports = sorted(airport_counts.items(), key=lambda x: x[0])
 
         if not airports:
-            import json
-            raw_dump = json.dumps(atc_list[:3], indent=2)[:1800]
             await interaction.followup.send(
-                f"⚠️ Got controller data but couldn't parse airport names. Here's a sample:\n"
-                f"```json\n{raw_dump}\n```",
-                ephemeral=True
+                f"⚠️ No active controllers on the {server_choice} server right now.", ephemeral=True
             )
             return
 
