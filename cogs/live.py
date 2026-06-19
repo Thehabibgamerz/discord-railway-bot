@@ -129,15 +129,25 @@ async def build_flight_embed(session_id: str, flight: dict, index: int, total: i
                         arrival = waypoint_ids[-1]
                         short_route = " ".join(waypoint_ids)
 
-                    # If the API tags item types (SID/STAR/APPROACH), pull those out
+                    # If the API tags item types (SID/STAR/APPROACH), pull those out.
+                    # NOTE: "type" appears to be an integer code, not a string —
+                    # we don't yet know the exact int→label mapping, so this is
+                    # left as a debug print rather than guessed at.
+                    seen_types = set()
                     for i in items:
-                        item_type = (i.get("type") or "").upper()
+                        raw_type = i.get("type")
+                        seen_types.add(raw_type)
+                        item_type = str(raw_type).upper() if raw_type is not None else ""
                         if item_type == "SID":
                             sid = i.get("identifier", sid)
                         elif item_type == "STAR":
                             star = i.get("identifier", star)
                         elif item_type == "APPROACH":
                             approach = i.get("identifier", approach)
+
+                    if sid == "N/A" and star == "N/A" and approach == "N/A" and items:
+                        sample = [f"{i.get('identifier')}: type={i.get('type')}" for i in items[:25]]
+                        debug_text = "Item type codes seen (need mapping for SID/STAR/APPROACH):\n" + "\n".join(sample)
 
                     # Progress + ETA based on remaining distance to destination
                     if waypoint_ids and lat is not None and lon is not None:
