@@ -102,23 +102,25 @@ async def build_flight_embed(session_id: str, flight: dict, index: int, total: i
         except Exception:
             pass
 
-        # Flight plan lookup
+        # Flight plan lookup — confirmed endpoint from official docs
         if flight_id:
+            fp_url = f"{BASE_URL}/sessions/{session_id}/flights/{flight_id}/flightplan?apikey={IF_API_KEY}"
+
             try:
-                fp_data, status = await fetch_json(
-                    session, f"{BASE_URL}/sessions/{session_id}/flightplan/{flight_id}?apikey={IF_API_KEY}"
-                )
+                fp_data, status = await fetch_json(session, fp_url)
 
                 if fp_data is None:
-                    debug_text = f"flightplan HTTP {status} | flightId used: `{flight_id}`"
+                    debug_text = f"flightplan endpoint → HTTP {status} | flightId used: `{flight_id}`"
                 else:
                     fp_result = fp_data.get("result", {})
-                    items = fp_result.get("flightPlanItems", [])
+                    items = fp_result.get("flightPlanItems", []) or fp_result.get("waypoints", [])
 
                     if not items:
-                        # Show the raw shape so we can see the real key names
                         import json
-                        debug_text = f"flightId: `{flight_id}`\n```json\n{json.dumps(fp_data, indent=2)[:800]}\n```"
+                        debug_text = (
+                            "Flightplan endpoint responded but no flightPlanItems/waypoints found. Raw response:\n"
+                            f"```json\n{json.dumps(fp_data, indent=2)[:1200]}\n```"
+                        )
 
                     waypoint_ids = [i.get("identifier") for i in items if i.get("identifier")]
 
