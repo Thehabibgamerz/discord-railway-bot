@@ -83,6 +83,8 @@ async def build_flight_embed(session_id: str, flight: dict, index: int, total: i
     progress_pct = None
     eta_text = "N/A"
 
+    debug_text = None
+
     async with aiohttp.ClientSession() as session:
 
         # Aircraft / livery lookup
@@ -106,9 +108,17 @@ async def build_flight_embed(session_id: str, flight: dict, index: int, total: i
                 fp_data, status = await fetch_json(
                     session, f"{BASE_URL}/sessions/{session_id}/flightplan/{flight_id}?apikey={IF_API_KEY}"
                 )
-                if fp_data:
+
+                if fp_data is None:
+                    debug_text = f"flightplan HTTP {status} | flightId used: `{flight_id}`"
+                else:
                     fp_result = fp_data.get("result", {})
                     items = fp_result.get("flightPlanItems", [])
+
+                    if not items:
+                        # Show the raw shape so we can see the real key names
+                        import json
+                        debug_text = f"flightId: `{flight_id}`\n```json\n{json.dumps(fp_data, indent=2)[:800]}\n```"
 
                     waypoint_ids = [i.get("identifier") for i in items if i.get("identifier")]
 
@@ -148,8 +158,8 @@ async def build_flight_embed(session_id: str, flight: dict, index: int, total: i
                                 eta_minutes = int(eta_hours * 60)
                                 hrs, mins = divmod(eta_minutes, 60)
                                 eta_text = f"{hrs}h {mins}m"
-            except Exception:
-                pass
+            except Exception as e:
+                debug_text = f"Exception: {e}"
 
     embed = discord.Embed(
         title=f"{username} | {callsign}",
@@ -192,6 +202,13 @@ async def build_flight_embed(session_id: str, flight: dict, index: int, total: i
         value=f"```{short_route}```",
         inline=False
     )
+
+    if debug_text:
+        embed.add_field(
+            name="🛠️ Debug (flight plan lookup)",
+            value=debug_text[:1000],
+            inline=False
+        )
 
     embed.set_footer(text=f"Showing {index + 1}/{total} • AkasaAirVirtual • Infinite Flight Live")
 
