@@ -85,9 +85,26 @@ class TicketDropdown(discord.ui.Select):
                 ephemeral=True
             )
 
-        # Unique ticket name
-        timestamp = datetime.utcnow().strftime("%H%M%S")
-        channel_name = f"ticket-{interaction.user.name.lower()}-{timestamp}"
+        # Prefix per category, e.g. "Support", "Recruitment"
+        category_prefix = {
+            "General Support": "support",
+            "Recruitments": "recruitment",
+            "Executive Team Support": "exec",
+            "PIREP Support": "pirep",
+            "Route Support": "route"
+        }
+        prefix = category_prefix.get(self.values[0], "ticket")
+
+        username = interaction.user.name.lower().replace(" ", "-")
+
+        # Count existing tickets in this category with the same prefix
+        # to generate the next sequential number (e.g. 001, 002, ...)
+        existing = [
+            ch for ch in category.text_channels
+            if ch.name.startswith(f"{prefix}-")
+        ]
+        next_number = len(existing) + 1
+        channel_name = f"{prefix}-{username}-{next_number:03d}"
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(
