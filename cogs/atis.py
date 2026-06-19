@@ -15,19 +15,6 @@ SERVER_MAP = {
     "Expert": "expert"
 }
 
-# ATC facility type IDs used by the Infinite Flight Live API.
-# Adjust these if they don't match what comes back in your testing.
-ATC_FACILITY_TYPES = {
-    0: "Ground",
-    1: "Tower",
-    2: "Unicom",
-    3: "Clearance",
-    4: "Approach",
-    5: "Departure",
-    6: "Center",
-    7: "ATIS"
-}
-
 
 class ATIS(commands.Cog):
     def __init__(self, bot):
@@ -49,7 +36,8 @@ class ATIS(commands.Cog):
                 super().__init__(placeholder="Select a server...", min_values=1, max_values=1, options=options)
 
             async def callback(self, select_interaction: discord.Interaction):
-                # Defer since we're making several API calls
+                # Defer ephemerally while we fetch data; the final ATIS embed
+                # is sent publicly (visible to everyone in the channel) below
                 await select_interaction.response.defer(ephemeral=True, thinking=True)
 
                 server_choice = self.values[0]
@@ -118,7 +106,9 @@ class ATIS(commands.Cog):
                         )
                         return
 
-                    # Step 4: Fetch airport status (name + active controllers/frequencies)
+                    # Step 4: Fetch airport name (from status) and active
+                    # controllers (from the /atc endpoint, which has real
+                    # usernames rather than raw IDs)
                     airport_name = airport
                     controllers_text = "None online"
                     atis_frequency = None
@@ -129,18 +119,40 @@ class ATIS(commands.Cog):
                             if resp.status == 200:
                                 status_data = await resp.json()
                                 result = status_data.get("result", {})
-
                                 airport_name = result.get("airportName") or airport
+                    except Exception:
+                        pass
 
-                                facilities = result.get("atcFacilities", [])
-                                if facilities:
+                    try:
+                        atc_url = f"{BASE_URL}/sessions/{session_id}/atc?apikey={IF_API_KEY}"
+                        async with session.get(atc_url) as resp:
+                            if resp.status == 200:
+                                atc_data = await resp.json()
+                                atc_list = atc_data.get("result", [])
+
+                                # Each entry typically has a "stationName" like
+                                # "MPTO_TWR" or "MPTO_ATIS" plus a "username".
+                                # Filter to controllers at this airport.
+                                airport_controllers = [
+                                    c for c in atc_list
+                                    if airport in (c.get("stationName") or "")
+                                ]
+
+                                if airport_controllers:
                                     lines = []
-                                    for f in facilities:
-                                        f_type = ATC_FACILITY_TYPES.get(f.get("type"), f.get("type"))
-                                        freq = f.get("frequency") or f.get("frequencyId") or "N/A"
-                                        lines.append(f"**{f_type}** — {freq}")
-                                        if f_type == "ATIS":
+                                    for c in airport_controllers:
+                                        station = c.get("stationName", "")
+                                        facility = station.split("_")[-1] if "_" in station else "ATC"
+                                        controller_name = c.get("username", "Unknown")
+                                        freq = c.get("frequency")
+
+                                        if facility.upper() == "ATIS" and freq:
                                             atis_frequency = freq
+
+                                        if freq:
+                                            lines.append(f"**{facility}** — {controller_name} ({freq})")
+                                        else:
+                                            lines.append(f"**{facility}** — {controller_name}")
                                     controllers_text = "\n".join(lines)
                     except Exception:
                         # Non-fatal — just fall back to defaults above
@@ -200,7 +212,8 @@ class ATIS(commands.Cog):
                 )
 
                 embed.set_footer(text="AkasaAirVirtual • Infinite Flight Live")
-                await select_interaction.followup.send(embed=embed)
+                # Public message — visible to everyone in the channel, not just the requester
+                await select_interaction.followup.send(embed=embed, ephemeral=False)
 
         # Step 0: Send dropdown view
         view = discord.ui.View()
