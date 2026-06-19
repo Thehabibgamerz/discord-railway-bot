@@ -102,7 +102,7 @@ async def build_flight_embed(session_id: str, flight: dict, index: int, total: i
         except Exception:
             pass
 
-        # Flight plan lookup — confirmed endpoint from official docs
+        # Flight plan lookup — confirmed endpoint + schema from official docs
         if flight_id:
             fp_url = f"{BASE_URL}/sessions/{session_id}/flights/{flight_id}/flightplan?apikey={IF_API_KEY}"
 
@@ -113,52 +113,46 @@ async def build_flight_embed(session_id: str, flight: dict, index: int, total: i
                     debug_text = f"flightplan endpoint → HTTP {status} | flightId used: `{flight_id}`"
                 else:
                     fp_result = fp_data.get("result", {})
-                    items = fp_result.get("flightPlanItems", []) or fp_result.get("waypoints", [])
+                    items = fp_result.get("flightPlanItems", [])
 
                     if not items:
                         import json
                         debug_text = (
-                            "Flightplan endpoint responded but no flightPlanItems/waypoints found. Raw response:\n"
+                            "Flightplan endpoint responded but flightPlanItems is empty. Raw response:\n"
                             f"```json\n{json.dumps(fp_data, indent=2)[:1200]}\n```"
                         )
 
-                    waypoint_ids = [i.get("identifier") for i in items if i.get("identifier")]
+                    # "name" is the reliable label (per docs, "identifier" can be null/non-unique)
+                    waypoint_names = [i.get("name") for i in items if i.get("name")]
 
-                    if waypoint_ids:
-                        departure = waypoint_ids[0]
-                        arrival = waypoint_ids[-1]
-                        short_route = " ".join(waypoint_ids)
+                    if waypoint_names:
+                        departure = waypoint_names[0]
+                        arrival = waypoint_names[-1]
+                        short_route = " ".join(waypoint_names)
 
-                    # If the API tags item types (SID/STAR/APPROACH), pull those out.
-                    # NOTE: "type" appears to be an integer code, not a string —
-                    # we don't yet know the exact int→label mapping, so this is
-                    # left as a debug print rather than guessed at.
-                    seen_types = set()
+                    # type (0=SID, 1=STAR, 2=Approach, 3=Track) is ONLY meaningful
+                    # when "children" is populated — that marks a procedure item
+                    PROCEDURE_TYPES = {0: "sid", 1: "star", 2: "approach"}
                     for i in items:
-                        raw_type = i.get("type")
-                        seen_types.add(raw_type)
-                        item_type = str(raw_type).upper() if raw_type is not None else ""
-                        if item_type == "SID":
-                            sid = i.get("identifier", sid)
-                        elif item_type == "STAR":
-                            star = i.get("identifier", star)
-                        elif item_type == "APPROACH":
-                            approach = i.get("identifier", approach)
+                        if i.get("children"):
+                            label = PROCEDURE_TYPES.get(i.get("type"))
+                            name = i.get("name") or i.get("identifier")
+                            if label == "sid":
+                                sid = name
+                            elif label == "star":
+                                star = name
+                            elif label == "approach":
+                                approach = name
 
-                    if sid == "N/A" and star == "N/A" and approach == "N/A" and items:
-                        sample = [f"{i.get('identifier')}: type={i.get('type')}" for i in items[:25]]
-                        debug_text = "Item type codes seen (need mapping for SID/STAR/APPROACH):\n" + "\n".join(sample)
+                    # Progress + ETA based on remaining distance to destination.
+                    # Coordinates are nested under "location": {latitude, longitude, altitude}
+                    if waypoint_names and lat is not None and lon is not None:
+                        dest_loc = items[-1].get("location", {})
+                        origin_loc = items[0].get("location", {})
+                        dest_lat, dest_lon = dest_loc.get("latitude"), dest_loc.get("longitude")
+                        origin_lat, origin_lon = origin_loc.get("latitude"), origin_loc.get("longitude")
 
-                    # Progress + ETA based on remaining distance to destination
-                    if waypoint_ids and lat is not None and lon is not None:
-                        dest_item = items[-1]
-                        dest_lat = dest_item.get("latitude")
-                        dest_lon = dest_item.get("longitude")
-                        origin_item = items[0]
-                        origin_lat = origin_item.get("latitude")
-                        origin_lon = origin_item.get("longitude")
-
-                        if None not in (dest_lat, dest_lon, origin_lat, origin_lon):
+                        if None not in (dest_lat, dest_lon, origin_lat, origin_lon) and (dest_lat, dest_lon) != (0, 0):
                             total_dist = haversine_nm(origin_lat, origin_lon, dest_lat, dest_lon)
                             remaining_dist = haversine_nm(lat, lon, dest_lat, dest_lon)
 
