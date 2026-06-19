@@ -19,6 +19,7 @@ class GiveawayView(View):
     async def update_embed(self):
         gd = self.giveaway_data
 
+        # ✅ Convert IST → UTC → timestamp
         timestamp = int(gd["end_time"].astimezone(timezone.utc).timestamp())
 
         participants = [f"<@{uid}>" for uid in gd["participants"]]
@@ -27,7 +28,6 @@ class GiveawayView(View):
         embed = discord.Embed(
             title=f"🎁 {gd['title']}",
             description=(
-                f"🏆 **Prize:** {gd['prize']}\n\n"
                 f"📋 {gd['description']}\n\n"
                 f"🕒 Ends:\n📅 <t:{timestamp}:F>\n⏰ <t:{timestamp}:R>\n\n"
                 f"**Participants ({len(participants)}):**\n{participants_text}"
@@ -47,60 +47,42 @@ class GiveawayView(View):
 
     @discord.ui.button(label="🎉 Enter Giveaway", style=discord.ButtonStyle.success)
     async def enter(self, interaction: discord.Interaction, button: Button):
-
         user_id = interaction.user.id
 
         if user_id in self.giveaway_data["participants"]:
-            return await interaction.response.send_message(
-                "⚠️ You are already entered!",
-                ephemeral=True
-            )
+            return await interaction.response.send_message("⚠️ You are already entered!", ephemeral=True)
 
         self.giveaway_data["participants"].append(user_id)
-
         await self.update_embed()
 
-        await interaction.response.send_message(
-            "✅ You entered the giveaway!",
-            ephemeral=True
-        )
+        await interaction.response.send_message("✅ You entered the giveaway!", ephemeral=True)
 
     @discord.ui.button(label="❌ Remove Me", style=discord.ButtonStyle.danger)
     async def remove(self, interaction: discord.Interaction, button: Button):
-
         user_id = interaction.user.id
 
         if user_id not in self.giveaway_data["participants"]:
-            return await interaction.response.send_message(
-                "⚠️ You are not entered!",
-                ephemeral=True
-            )
+            return await interaction.response.send_message("⚠️ You are not entered!", ephemeral=True)
 
         self.giveaway_data["participants"].remove(user_id)
-
         await self.update_embed()
 
-        await interaction.response.send_message(
-            "❌ You were removed from the giveaway.",
-            ephemeral=True
-        )
+        await interaction.response.send_message("❌ You were removed from the giveaway.", ephemeral=True)
 
 
 class GiveawayProLive(commands.Cog):
-
     def __init__(self, bot):
         self.bot = bot
         self.active_giveaways = {}
 
     @app_commands.command(
         name="create_giveaway",
-        description="Create giveaway (IST timezone)"
+        description="Create giveaway (IST → auto timezone)"
     )
     async def create_giveaway(
         self,
         interaction: discord.Interaction,
         title: str,
-        prize: str,
         description: str,
         ends_on: str,
         channel: discord.TextChannel,
@@ -108,12 +90,9 @@ class GiveawayProLive(commands.Cog):
         image: str = None
     ):
 
+        # ✅ Parse IST input
         try:
-            dt = datetime.strptime(
-                ends_on,
-                "%Y-%m-%d %H:%M"
-            ).replace(tzinfo=IST)
-
+            dt = datetime.strptime(ends_on, "%Y-%m-%d %H:%M").replace(tzinfo=IST)
         except ValueError:
             return await interaction.response.send_message(
                 "❌ Invalid format! Use YYYY-MM-DD HH:MM",
@@ -128,7 +107,6 @@ class GiveawayProLive(commands.Cog):
 
         giveaway_data = {
             "title": title,
-            "prize": prize,
             "description": description,
             "host": interaction.user,
             "end_time": dt,
@@ -139,12 +117,12 @@ class GiveawayProLive(commands.Cog):
 
         self.active_giveaways[channel.id] = giveaway_data
 
+        # ✅ Timestamp
         timestamp = int(dt.astimezone(timezone.utc).timestamp())
 
         embed = discord.Embed(
             title=f"🎁 {title}",
             description=(
-                f"🏆 **Prize:** {prize}\n\n"
                 f"📋 {description}\n\n"
                 f"🕒 Ends:\n📅 <t:{timestamp}:F>\n⏰ <t:{timestamp}:R>\n\n"
                 f"**Participants:** None yet"
@@ -162,13 +140,9 @@ class GiveawayProLive(commands.Cog):
 
         mention_text = on_create_mentions.mention if on_create_mentions else ""
 
-        message = await channel.send(
-            content=mention_text,
-            embed=embed
-        )
+        message = await channel.send(content=mention_text, embed=embed)
 
         view = GiveawayView(giveaway_data, message)
-
         await message.edit(view=view)
 
         await interaction.response.send_message(
@@ -176,32 +150,21 @@ class GiveawayProLive(commands.Cog):
             ephemeral=True
         )
 
+        # ⏳ Wait until end
         while True:
-
             now = datetime.now(timezone.utc)
-
             if now >= dt.astimezone(timezone.utc):
                 break
-
             await asyncio.sleep(30)
 
+        # 🎉 End giveaway
         participants = giveaway_data["participants"]
 
         if not participants:
-
-            await channel.send(
-                f"❌ Giveaway **{title}** ended. No participants."
-            )
-
+            await channel.send(f"❌ Giveaway **{title}** ended. No participants.")
         else:
-
             winner_id = random.choice(participants)
-
-            await channel.send(
-                f"🎉 Giveaway **{title}** ended!\n\n"
-                f"🏆 Prize: **{prize}**\n"
-                f"🥇 Winner: <@{winner_id}>"
-            )
+            await channel.send(f"🎉 Giveaway **{title}** ended! Winner: <@{winner_id}> 🏆")
 
         del self.active_giveaways[channel.id]
 
