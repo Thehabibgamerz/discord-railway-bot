@@ -177,8 +177,13 @@ class ServerSelect(discord.ui.Select):
         atc_list = atc_data.get("result", [])
 
         if not atc_list:
+            # Debug aid: dump the raw response so we can see why it's empty
+            import json
+            raw_dump = json.dumps(atc_data, indent=2)[:1800]
             await interaction.followup.send(
-                f"⚠️ No active controllers on the {server_choice} server right now.", ephemeral=True
+                f"⚠️ No active controllers on the {server_choice} server right now.\n"
+                f"```json\n{raw_dump}\n```",
+                ephemeral=True
             )
             return
 
@@ -193,8 +198,12 @@ class ServerSelect(discord.ui.Select):
         airports = sorted(airport_counts.items(), key=lambda x: x[0])
 
         if not airports:
+            import json
+            raw_dump = json.dumps(atc_list[:3], indent=2)[:1800]
             await interaction.followup.send(
-                f"⚠️ No active controllers on the {server_choice} server right now.", ephemeral=True
+                f"⚠️ Got controller data but couldn't parse airport names. Here's a sample:\n"
+                f"```json\n{raw_dump}\n```",
+                ephemeral=True
             )
             return
 
