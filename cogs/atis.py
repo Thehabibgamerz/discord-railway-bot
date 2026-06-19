@@ -3,7 +3,6 @@ from discord.ext import commands
 from discord import app_commands
 import aiohttp
 import os
-from datetime import datetime, timezone
 
 # Use environment variable for security on Railway
 IF_API_KEY = os.getenv("IF_API_KEY")
@@ -36,8 +35,6 @@ class ATIS(commands.Cog):
                 super().__init__(placeholder="Select a server...", min_values=1, max_values=1, options=options)
 
             async def callback(self, select_interaction: discord.Interaction):
-                # Defer ephemerally while we fetch data; the final ATIS embed
-                # is sent publicly (visible to everyone in the channel) below
                 await select_interaction.response.defer(ephemeral=True, thinking=True)
 
                 server_choice = self.values[0]
@@ -102,63 +99,11 @@ class ATIS(commands.Cog):
 
                     if error_code != 0 or not result_text:
                         await select_interaction.followup.send(
-                            f"⚠️ No active ATIS available for {airport} on {server_choice}.", ephemeral=True
+                            "No ATIS available for this airport.", ephemeral=False
                         )
                         return
 
-                    # Step 4: Fetch airport name (from status) and active
-                    # controllers (from the /atc endpoint, which has real
-                    # usernames rather than raw IDs)
-                    airport_name = airport
-                    controllers_text = "None online"
-                    atis_frequency = None
-
-                    try:
-                        status_url = f"{BASE_URL}/sessions/{session_id}/airport/{airport}/status?apikey={IF_API_KEY}"
-                        async with session.get(status_url) as resp:
-                            if resp.status == 200:
-                                status_data = await resp.json()
-                                result = status_data.get("result", {})
-                                airport_name = result.get("airportName") or airport
-                    except Exception:
-                        pass
-
-                    try:
-                        atc_url = f"{BASE_URL}/sessions/{session_id}/atc?apikey={IF_API_KEY}"
-                        async with session.get(atc_url) as resp:
-                            if resp.status == 200:
-                                atc_data = await resp.json()
-                                atc_list = atc_data.get("result", [])
-
-                                # Each entry typically has a "stationName" like
-                                # "MPTO_TWR" or "MPTO_ATIS" plus a "username".
-                                # Filter to controllers at this airport.
-                                airport_controllers = [
-                                    c for c in atc_list
-                                    if airport in (c.get("stationName") or "")
-                                ]
-
-                                if airport_controllers:
-                                    lines = []
-                                    for c in airport_controllers:
-                                        station = c.get("stationName", "")
-                                        facility = station.split("_")[-1] if "_" in station else "ATC"
-                                        controller_name = c.get("username", "Unknown")
-                                        freq = c.get("frequency")
-
-                                        if facility.upper() == "ATIS" and freq:
-                                            atis_frequency = freq
-
-                                        if freq:
-                                            lines.append(f"**{facility}** — {controller_name} ({freq})")
-                                        else:
-                                            lines.append(f"**{facility}** — {controller_name}")
-                                    controllers_text = "\n".join(lines)
-                    except Exception:
-                        # Non-fatal — just fall back to defaults above
-                        pass
-
-                    # Step 5: Fetch METAR / weather
+                    # Step 4: Fetch METAR / weather
                     metar_text = "Unavailable"
                     try:
                         weather_url = f"{BASE_URL}/sessions/{session_id}/weather/{airport}?apikey={IF_API_KEY}"
@@ -174,35 +119,11 @@ class ATIS(commands.Cog):
                     except Exception:
                         pass
 
-                # Step 6: Build embed
+                # Step 5: Build embed — ATIS and METAR only
                 embed = discord.Embed(
-                    title=f"📡 ATIS — {airport_name} ({airport})",
+                    title=f"📡 ATIS — {airport}",
                     description=f"```{result_text}```",
                     color=discord.Color.orange()
-                )
-
-                embed.add_field(
-                    name="🖥️ Server",
-                    value=server_choice,
-                    inline=True
-                )
-
-                embed.add_field(
-                    name="📻 ATIS Frequency",
-                    value=atis_frequency or "N/A",
-                    inline=True
-                )
-
-                embed.add_field(
-                    name="🕐 Updated",
-                    value=f"<t:{int(datetime.now(timezone.utc).timestamp())}:R>",
-                    inline=True
-                )
-
-                embed.add_field(
-                    name="🎙️ Active Controllers",
-                    value=controllers_text,
-                    inline=False
                 )
 
                 embed.add_field(
@@ -212,7 +133,6 @@ class ATIS(commands.Cog):
                 )
 
                 embed.set_footer(text="AkasaAirVirtual • Infinite Flight Live")
-                # Public message — visible to everyone in the channel, not just the requester
                 await select_interaction.followup.send(embed=embed, ephemeral=False)
 
         # Step 0: Send dropdown view
