@@ -192,6 +192,68 @@ class TicketPanel(discord.ui.View):
     def __init__(self):    
         super().__init__(timeout=None)    
         self.add_item(TicketDropdown())    
+
+
+# ================= CLOSE CONTROL VIEW =================
+
+class TicketCloseConfirmView(discord.ui.View):
+
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.button(
+        label="Confirm Close",
+        emoji="🔒",
+        style=discord.ButtonStyle.red
+    )
+    async def confirm_close(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        owner_id = None
+
+        if interaction.channel.topic:
+            try:
+                owner_id = int(
+                    interaction.channel.topic.replace(
+                        "Ticket Owner: ",
+                        ""
+                    )
+                )
+            except:
+                pass
+
+        if owner_id:
+            owner = interaction.guild.get_member(owner_id)
+
+            if owner:
+                await interaction.channel.set_permissions(
+                    owner,
+                    view_channel=True,
+                    send_messages=False,
+                    add_reactions=False,
+                    attach_files=False,
+                    embed_links=False,
+                    create_public_threads=False,
+                    create_private_threads=False
+                )
+
+        embed = discord.Embed(
+            title="🔒 Ticket Closed",
+            description=(
+                "This ticket has been locked.\n\n"
+                "Only staff members can send messages.\n"
+                "Use the buttons below to reopen or delete."
+            ),
+            color=discord.Color.red()
+        )
+
+        await interaction.response.send_message(
+            embed=embed,
+            view=TicketCloseControls()
+        )
     
     
 # ================= TICKET CONTROLS =================    
@@ -228,23 +290,40 @@ class TicketControls(discord.ui.View):
         await interaction.response.send_message(embed=embed)    
     
     # CLOSE BUTTON    
-    @discord.ui.button(    
-        label="Close",    
-        emoji="🔒",    
-        style=discord.ButtonStyle.red,    
-        custom_id="ticket_close"    
+   @discord.ui.button(
+    label="Close",
+    emoji="🔒",
+    style=discord.ButtonStyle.red,
+    custom_id="ticket_close"
+)
+async def close(
+    self,
+    interaction: discord.Interaction,
+    button: discord.ui.Button
+):
+
+    if not is_staff(interaction.user):
+        return await interaction.response.send_message(
+            "❌ Only staff members can close tickets.",
+            ephemeral=True
+        )
+
+    embed = discord.Embed(
+        title="⚠️ Close Ticket Confirmation",
+        description=(
+            "Are you sure you want to close this ticket?\n\n"
+            "• Members will no longer be able to send messages.\n"
+            "• Staff members will still have access.\n"
+            "• The ticket can be reopened later."
+        ),
+        color=discord.Color.orange()
+    )
+
+    await interaction.response.send_message(
+        embed=embed,
+        view=TicketCloseConfirmView(),
+        ephemeral=True
     )    
-    async def close(    
-        self,    
-        interaction: discord.Interaction,    
-        button: discord.ui.Button    
-    ):    
-    
-        if not is_staff(interaction.user):    
-            return await interaction.response.send_message(    
-                "❌ Only staff members can close tickets.",    
-                ephemeral=True    
-            )    
     
         # GET TICKET OWNER
         owner_id = None
