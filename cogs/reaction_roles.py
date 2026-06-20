@@ -55,9 +55,9 @@ class SelfRoleSelect(discord.ui.Select):
         ]
 
         super().__init__(
-            placeholder="🌀 Select your notification roles",
-            min_values=0,
-            max_values=len(options),
+            placeholder="🌀 Select your notification role",
+            min_values=1,
+            max_values=1,
             options=options,
             custom_id="self_role_select"
         )
