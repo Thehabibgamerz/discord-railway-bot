@@ -533,4 +533,4 @@ class Event(commands.Cog):
             )
             db_set_discord_event_id(event_id, scheduled_event.id)
         except discord.Forbidden:
-            discord_event_warning = "⚠️ Couldn't create the Discord Scheduled Event — the bot is missing the **Manage Events** p
+            discord_event_warning = "Couldn't create the Discord Scheduled Event - the bot is missing the Manage Events permissi
