@@ -505,7 +505,7 @@ class Event(commands.Cog):
             msg = await channel.send(content=mention_text, embed=embed)
         except discord.Forbidden:
             return await interaction.response.send_message(
-                f"❌ I don't have permission to send messages in {channel.mention}.", ephemeral=True
+                f"❌ I do not have permission to send messages in {channel.mention}.", ephemeral=True
             )
 
         db_set_message_id(event_id, msg.id)
@@ -533,4 +533,4 @@ class Event(commands.Cog):
             )
             db_set_discord_event_id(event_id, scheduled_event.id)
         except discord.Forbidden:
-            discord_event_warning = "Couldn't create the Discord Scheduled Event - the bot is missing the Manage Events permissi
+            discord_event_warning = "Could not create the Discord Scheduled Event - the bot is missing the Manage Events permis
