@@ -55,9 +55,9 @@ class SelfRoleSelect(discord.ui.Select):
         ]
 
         super().__init__(
-            placeholder="🌀 Select your notification roles",
-            min_values=0,
-            max_values=len(options),
+            placeholder="🌀 Select your notification role",
+            min_values=1,
+            max_values=1,
             options=options,
             custom_id="self_role_select"
         )
@@ -66,35 +66,28 @@ class SelfRoleSelect(discord.ui.Select):
         guild = interaction.guild
         member = interaction.user
 
-        selected_ids = {int(v) for v in self.values}
+        selected_id = int(self.values[0])
+        selected_opt = next((opt for opt in ROLE_OPTIONS if opt["role_id"] == selected_id), None)
 
-        added = []
-        removed = []
+        if not selected_opt:
+            await interaction.response.send_message("⚠️ Unknown role selected.", ephemeral=True)
+            return
 
-        for opt in ROLE_OPTIONS:
-            role = guild.get_role(opt["role_id"])
-            if not role:
-                continue
+        role = guild.get_role(selected_id)
+        if not role:
+            await interaction.response.send_message("⚠️ That role no longer exists.", ephemeral=True)
+            return
 
-            has_role = role in member.roles
-            wants_role = opt["role_id"] in selected_ids
-
-            if wants_role and not has_role:
-                await member.add_roles(role, reason="Self-role panel selection")
-                added.append(opt["label"])
-            elif not wants_role and has_role:
-                await member.remove_roles(role, reason="Self-role panel deselection")
-                removed.append(opt["label"])
-
-        lines = []
-        if added:
-            lines.append(f"✅ Added: **{', '.join(added)}**")
-        if removed:
-            lines.append(f"❌ Removed: **{', '.join(removed)}**")
-        if not lines:
-            lines.append("No changes made.")
-
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        if role in member.roles:
+            await member.remove_roles(role, reason="Self-role panel deselection")
+            await interaction.response.send_message(
+                f"❌ Removed: **{selected_opt['label']}**", ephemeral=True
+            )
+        else:
+            await member.add_roles(role, reason="Self-role panel selection")
+            await interaction.response.send_message(
+                f"✅ Added: **{selected_opt['label']}**", ephemeral=True
+            )
 
 
 class SelfRoleView(discord.ui.View):
