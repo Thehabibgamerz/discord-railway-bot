@@ -44,7 +44,9 @@ def init_db():
             host_id INTEGER NOT NULL,
             on_start_role_id INTEGER,
             locked INTEGER DEFAULT 0,
-            started INTEGER DEFAULT 0
+            started INTEGER DEFAULT 0,
+            discord_event_id INTEGER,
+            duration_minutes INTEGER DEFAULT 60
         )
     """)
     conn.execute("""
@@ -54,23 +56,38 @@ def init_db():
             PRIMARY KEY (event_id, user_id)
         )
     """)
+
+    # Migration: add columns if upgrading from an older version of this file
+    existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(events)").fetchall()}
+    if "discord_event_id" not in existing_cols:
+        conn.execute("ALTER TABLE events ADD COLUMN discord_event_id INTEGER")
+    if "duration_minutes" not in existing_cols:
+        conn.execute("ALTER TABLE events ADD COLUMN duration_minutes INTEGER DEFAULT 60")
+
     conn.commit()
     conn.close()
 
 
 def db_create_event(guild_id, channel_id, title, description, image_url,
-                     event_time_utc, host_id, on_start_role_id):
+                     event_time_utc, host_id, on_start_role_id, duration_minutes=60):
     conn = get_db()
     cur = conn.execute("""
         INSERT INTO events (guild_id, channel_id, title, description, image_url,
-                             event_time_utc, host_id, on_start_role_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                             event_time_utc, host_id, on_start_role_id, duration_minutes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (guild_id, channel_id, title, description, image_url,
-          event_time_utc, host_id, on_start_role_id))
+          event_time_utc, host_id, on_start_role_id, duration_minutes))
     conn.commit()
     event_id = cur.lastrowid
     conn.close()
     return event_id
+
+
+def db_set_discord_event_id(event_id, discord_event_id):
+    conn = get_db()
+    conn.execute("UPDATE events SET discord_event_id = ? WHERE event_id = ?", (discord_event_id, event_id))
+    conn.commit()
+    conn.close()
 
 
 def db_set_message_id(event_id, message_id):
@@ -338,6 +355,30 @@ class EventEditModal(Modal):
         )
 
         event_row = db_get_event(self.event_id)
+
+        # Keep the linked Discord Scheduled Event in sync, if one exists
+        if event_row["discord_event_id"]:
+            try:
+                scheduled_event = interaction.guild.get_scheduled_event(event_row["discord_event_id"])
+                if scheduled_event is None:
+                    scheduled_event = await interaction.guild.fetch_scheduled_event(event_row["discord_event_id"])
+
+                edit_kwargs = {}
+                if self.title_input.value:
+                    edit_kwargs["name"] = self.title_input.value
+                if self.desc_input.value:
+                    edit_kwargs["description"] = self.desc_input.value
+                if new_time_utc:
+                    start_utc = datetime.fromisoformat(new_time_utc)
+                    duration = event_row["duration_minutes"] or 60
+                    edit_kwargs["start_time"] = start_utc
+                    edit_kwargs["end_time"] = start_utc + timedelta(minutes=duration)
+
+                if edit_kwargs:
+                    await scheduled_event.edit(**edit_kwargs)
+            except (discord.NotFound, discord.Forbidden, Exception):
+                pass  # Don't block the embed update if the Discord event sync fails
+
         attendee_ids = db_get_attendees(self.event_id)
         embed = build_event_embed(event_row, attendee_ids, interaction.guild)
 
@@ -404,6 +445,22 @@ class Event(commands.Cog):
         except discord.Forbidden:
             pass
 
+        # Transition the linked Discord Scheduled Event: External events must
+        # go scheduled -> active -> completed, so flip both in sequence.
+        if event_row["discord_event_id"]:
+            try:
+                guild = channel.guild
+                scheduled_event = guild.get_scheduled_event(event_row["discord_event_id"])
+                if scheduled_event is None:
+                    scheduled_event = await guild.fetch_scheduled_event(event_row["discord_event_id"])
+
+                if scheduled_event.status == discord.EventStatus.scheduled:
+                    scheduled_event = await scheduled_event.edit(status=discord.EventStatus.active)
+                if scheduled_event.status == discord.EventStatus.active:
+                    await scheduled_event.edit(status=discord.EventStatus.completed)
+            except (discord.NotFound, discord.Forbidden, Exception):
+                pass
+
     @app_commands.command(name="createevent", description="Create a PRO event (IST input, auto-converted)")
     async def createevent(
         self,
@@ -412,6 +469,7 @@ class Event(commands.Cog):
         event_datetime: str,
         description: str,
         channel: discord.TextChannel,
+        duration_minutes: int = 60,
         on_create_mentions: discord.Role = None,
         on_start_mentions: discord.Role = None,
         image: str = None
@@ -434,7 +492,8 @@ class Event(commands.Cog):
             image_url=image,
             event_time_utc=event_time_utc,
             host_id=interaction.user.id,
-            on_start_role_id=on_start_mentions.id if on_start_mentions else None
+            on_start_role_id=on_start_mentions.id if on_start_mentions else None,
+            duration_minutes=duration_minutes
         )
 
         event_row = db_get_event(event_id)
@@ -454,19 +513,24 @@ class Event(commands.Cog):
         view = EventButtons(event_id)
         await msg.edit(view=view)
 
-        await interaction.response.send_message(
-            f"✅ Event created in {channel.mention}",
-            ephemeral=True
-        )
+        # Also create a native Discord Scheduled Event. Text channels aren't a
+        # valid "entity" for scheduled events, so this is created as an
+        # External event pointing at the channel, which requires an end_time —
+        # hence the duration_minutes parameter.
+        discord_event_warning = None
+        try:
+            start_utc = dt.astimezone(timezone.utc)
+            end_utc = start_utc + timedelta(minutes=duration_minutes)
 
-    async def restore_views(self):
-        """Re-attach persistent views for every not-yet-started event on startup."""
-        for event_row in db_get_pending_events():
-            if event_row["message_id"]:
-                self.bot.add_view(EventButtons(event_row["event_id"]), message_id=event_row["message_id"])
-
-
-async def setup(bot):
-    cog = Event(bot)
-    await bot.add_cog(cog)
-    await cog.restore_views()
+            scheduled_event = await interaction.guild.create_scheduled_event(
+                name=title,
+                description=description,
+                start_time=start_utc,
+                end_time=end_utc,
+                entity_type=discord.EntityType.external,
+                location=f"#{channel.name}",
+                privacy_level=discord.PrivacyLevel.guild_only
+            )
+            db_set_discord_event_id(event_id, scheduled_event.id)
+        except discord.Forbidden:
+            discord_event_warning = "⚠️ Couldn't create the Discord Scheduled Event — the bot is missing the **Manage Events** p
