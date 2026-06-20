@@ -2,206 +2,148 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
-# 🔁 ROLE IDS
-STAFF_ROLE_ID = 1389824693388837035
+STAFF_ROLE = 1389824693388837035
 
-GROUP_ROLE = 1432617344068227102
-FEATURED_ROLE = 1432617094956060683
-ANNOUNCE_ROLE = 1432617170801791049
-IFATC_ROLE = 1389833550957641840
-IFAET_ROLE = 1389833738128719883
+ROLE_OPTIONS = [
+    {
+        "label": "Group Flights",
+        "description": "Get pinged when someone is looking to fly together",
+        "emoji": "✈️",
+        "role_id": 1432617344068227102
+    },
+    {
+        "label": "Featured",
+        "description": "Be the first to see pilot spotlights, top screenshots, and VA highlights",
+        "emoji": "🗺️",
+        "role_id": 1432617094956060683
+    },
+    {
+        "label": "Announcements",
+        "description": "Get notified when we post official news or updates",
+        "emoji": "📢",
+        "role_id": 1432617170801791049
+    },
+    {
+        "label": "IFATC Member",
+        "description": "Select this if you're part of IFATC",
+        "emoji": "<:IFATC:1389866636118462494>",
+        "role_id": 1389833550957641840
+    },
+    {
+        "label": "IFAET Member",
+        "description": "Choose this if you're part of IFAET",
+        "emoji": "<:IFAET:1389866639805255733>",
+        "role_id": 1389833738128719883
+    }
+]
 
 
-# ================= PERSISTENT VIEW =================
+def is_staff(member):
+    return STAFF_ROLE in [role.id for role in member.roles]
+
+
+class SelfRoleSelect(discord.ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(
+                label=opt["label"],
+                description=opt["description"],
+                emoji=opt["emoji"],
+                value=str(opt["role_id"])
+            )
+            for opt in ROLE_OPTIONS
+        ]
+
+        super().__init__(
+            placeholder="🌀 Select your notification roles",
+            min_values=0,
+            max_values=len(options),
+            options=options,
+            custom_id="self_role_select"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        member = interaction.user
+
+        selected_ids = {int(v) for v in self.values}
+
+        added = []
+        removed = []
+
+        for opt in ROLE_OPTIONS:
+            role = guild.get_role(opt["role_id"])
+            if not role:
+                continue
+
+            has_role = role in member.roles
+            wants_role = opt["role_id"] in selected_ids
+
+            if wants_role and not has_role:
+                await member.add_roles(role, reason="Self-role panel selection")
+                added.append(opt["label"])
+            elif not wants_role and has_role:
+                await member.remove_roles(role, reason="Self-role panel deselection")
+                removed.append(opt["label"])
+
+        lines = []
+        if added:
+            lines.append(f"✅ Added: **{', '.join(added)}**")
+        if removed:
+            lines.append(f"❌ Removed: **{', '.join(removed)}**")
+        if not lines:
+            lines.append("No changes made.")
+
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
 
 class SelfRoleView(discord.ui.View):
-
     def __init__(self):
         super().__init__(timeout=None)
+        self.add_item(SelfRoleSelect())
 
-    async def toggle_role(
-        self,
-        interaction: discord.Interaction,
-        role_id: int
-    ):
-
-        role = interaction.guild.get_role(role_id)
-
-        if not role:
-            return await interaction.response.send_message(
-                "❌ Role not found",
-                ephemeral=True
-            )
-
-        try:
-
-            if role in interaction.user.roles:
-
-                await interaction.user.remove_roles(role)
-
-                await interaction.response.send_message(
-                    f"❌ Removed {role.name}",
-                    ephemeral=True
-                )
-
-            else:
-
-                await interaction.user.add_roles(role)
-
-                await interaction.response.send_message(
-                    f"✅ Added {role.name}",
-                    ephemeral=True
-                )
-
-        except discord.Forbidden:
-
-            await interaction.response.send_message(
-                "❌ I don't have permission to manage roles.",
-                ephemeral=True
-            )
-
-        except Exception as e:
-
-            await interaction.response.send_message(
-                f"❌ Error:\n```{e}```",
-                ephemeral=True
-            )
-
-    # ================= BUTTONS =================
-
-    @discord.ui.button(
-        label="Group Flights",
-        emoji="🛫",
-        style=discord.ButtonStyle.secondary,
-        custom_id="selfrole_group"
-    )
-    async def group(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        await self.toggle_role(interaction, GROUP_ROLE)
-
-    @discord.ui.button(
-        label="Featured",
-        emoji="🗺️",
-        style=discord.ButtonStyle.secondary,
-        custom_id="selfrole_featured"
-    )
-    async def featured(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        await self.toggle_role(interaction, FEATURED_ROLE)
-
-    @discord.ui.button(
-        label="Announcements",
-        emoji="📣",
-        style=discord.ButtonStyle.secondary,
-        custom_id="selfrole_announce"
-    )
-    async def announce(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        await self.toggle_role(interaction, ANNOUNCE_ROLE)
-
-    @discord.ui.button(
-        label="IFATC Member",
-        emoji="✈️",
-        style=discord.ButtonStyle.success,
-        custom_id="selfrole_ifatc"
-    )
-    async def ifatc(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        await self.toggle_role(interaction, IFATC_ROLE)
-
-    @discord.ui.button(
-        label="IFAET Member",
-        emoji="🛠️",
-        style=discord.ButtonStyle.success,
-        custom_id="selfrole_ifaet"
-    )
-    async def ifaet(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        await self.toggle_role(interaction, IFAET_ROLE)
-
-
-# ================= COG =================
 
 class SelfRoles(commands.Cog):
-
     def __init__(self, bot):
         self.bot = bot
 
-        # ✅ REGISTER PERSISTENT VIEW
-        self.bot.add_view(SelfRoleView())
+    @app_commands.command(name="rolepanel", description="Send the self-roles selection panel")
+    async def rolepanel(self, interaction: discord.Interaction, channel: discord.TextChannel):
 
-    @app_commands.command(
-        name="reaction_role",
-        description="Send self role panel"
-    )
-    async def reaction_role(
-        self,
-        interaction: discord.Interaction,
-        channel: discord.TextChannel
-    ):
-
-        # ================= STAFF ONLY =================
-
-        if STAFF_ROLE_ID not in [r.id for r in interaction.user.roles]:
-
+        if not is_staff(interaction.user):
             return await interaction.response.send_message(
-                "❌ Staff only command",
+                "❌ Only staff members can send the role panel.",
                 ephemeral=True
             )
-
-        # ================= EMBED =================
 
         embed = discord.Embed(
             title="Self Roles",
             description=(
-                "## __Self Roles__\n\n"
-
-                "Hey there! Want to stay in the loop with everything happening at **Akasa Air Virtual?** "
-                "Take a moment to pick your notification roles below so you only get updates that matter to you. "
-                "Choose one, a few, or all — it's totally your call!\n\n"
-
-                "- 🛫 **Group Flights** – Get pinged when someone is looking to fly together.\n"
-                "- 🗺️ **Featured** – Be the first to see pilot spotlights, top screenshots, and VA highlights.\n"
-                "- 📣 **Announcements** – Get notified when we post official news or updates.\n"
-                "- <:IFATC:1389866636118462494> **IFATC Member** – Select this if you're part of IFATC.\n"
-                "- <:IFAET:1389866639805255733> **IFAET Member** – Choose this if you're part of IFAET."
+                "## Self Roles\n\n"
+                "Hey there! Want to stay in the loop with everything happening at "
+                "**Akasa Air Virtual**? Pick your notification roles below so you only "
+                "get updates that matter to you. Choose one, a few, or all — it's totally "
+                "your call!\n\n"
+                "✈️ **Group Flights** – Get pinged when someone is looking to fly together.\n"
+                "🗺️ **Featured** – Be the first to see pilot spotlights, top screenshots, "
+                "and VA highlights.\n"
+                "📢 **Announcements** – Get notified when we post official news or updates.\n"
+                "<:IFATC:1389866636118462494> **IFATC Member** – Select this if you're part of IFATC.\n"
+                "<:IFAET:1389866639805255733> **IFAET Member** – Choose this if you're part of IFAET."
             ),
             color=discord.Color.orange()
         )
+        embed.set_footer(text="Akasa Air Virtual")
 
-        embed.set_footer(
-            text="Akasa Air Virtual"
-        )
-
-        # ================= SEND PANEL =================
-
-        await channel.send(
-            embed=embed,
-            view=SelfRoleView()
-        )
+        await channel.send(embed=embed, view=SelfRoleView())
 
         await interaction.response.send_message(
-            "✅ Self role panel sent successfully.",
+            f"✅ Role panel sent in {channel.mention}",
             ephemeral=True
         )
 
 
-# ================= SETUP =================
-
+# Mandatory setup function
 async def setup(bot):
     await bot.add_cog(SelfRoles(bot))
+    bot.add_view(SelfRoleView())
