@@ -534,3 +534,23 @@ class Event(commands.Cog):
             db_set_discord_event_id(event_id, scheduled_event.id)
         except discord.Forbidden:
             discord_event_warning = "Could not create the Discord Scheduled Event - the bot is missing the Manage Events permis
+            except Exception as e:
+            discord_event_warning = f"Could not create the Discord Scheduled Event: {e}"
+
+        confirm_msg = f"✅ Event created in {channel.mention}"
+        if discord_event_warning:
+            confirm_msg += f"\n{discord_event_warning}"
+
+        await interaction.response.send_message(confirm_msg, ephemeral=True)
+
+    async def restore_views(self):
+        """Re-attach persistent views for every not-yet-started event on startup."""
+        for event_row in db_get_pending_events():
+            if event_row["message_id"]:
+                self.bot.add_view(EventButtons(event_row["event_id"]), message_id=event_row["message_id"])
+
+
+async def setup(bot):
+    cog = Event(bot)
+    await bot.add_cog(cog)
+    await cog.restore_views()
