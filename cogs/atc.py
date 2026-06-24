@@ -91,30 +91,31 @@ class AirportSelect(discord.ui.Select):
         airports = sorted(airport_counts.items(), key=lambda x: x[0])
 
         embed = discord.Embed(
-            title=f"🎙️ Live Infinite Flight {self.server_choice} Server Air Traffic Control",
-            description=f"Airport ICAO Code: **{airport}**",
+            title=f"🎙️ Live Infinite Flight {self.server_choice} Server ATC",
+            description=f"**Airport:** {airport}",
             color=discord.Color.blue()
         )
 
         map_lat, map_lng = None, None
 
+        # Build table rows
+        col1, col2, col3 = "Facility", "Controller", "Active For"
+        w1, w2, w3 = len(col1), len(col2), len(col3)
+
+        rows = []
         for c in controllers:
             facility = FACILITY_TYPES.get(c.get("type"), f"Type {c.get('type')}")
             username = c.get("username", "Unknown")
-
-            lines = [f"**Controller:** {username}"]
+            active_str = "N/A"
 
             start_time_raw = c.get("startTime")
             if start_time_raw:
                 try:
                     start_dt = datetime.fromisoformat(start_time_raw.replace("Z", "+00:00"))
-                    epoch = int(start_dt.timestamp())
                     elapsed = datetime.now(timezone.utc) - start_dt
                     hours, remainder = divmod(int(elapsed.total_seconds()), 3600)
-                    minutes = remainder // 60
-
-                    lines.append(f"**Time of start:** <t:{epoch}:t>")
-                    lines.append(f"**Active For:** {hours} Hours and {minutes} Minutes")
+                    mins = remainder // 60
+                    active_str = f"{hours}h {mins:02d}m"
                 except Exception:
                     pass
 
@@ -122,19 +123,25 @@ class AirportSelect(discord.ui.Select):
                 map_lat = c.get("latitude")
                 map_lng = c.get("longitude")
 
-            embed.add_field(
-                name=f"📍 {facility}",
-                value="\n".join(lines),
-                inline=False
-            )
+            rows.append((facility, username, active_str))
+            w1 = max(w1, len(facility))
+            w2 = max(w2, len(username))
+            w3 = max(w3, len(active_str))
+
+        # Assemble the table string
+        header = f"{col1:<{w1}}  {col2:<{w2}}  {col3:<{w3}}"
+        divider = f"{'─' * w1}  {'─' * w2}  {'─' * w3}"
+        table_lines = [header, divider]
+        for facility, username, active_str in rows:
+            table_lines.append(f"{facility:<{w1}}  {username:<{w2}}  {active_str:<{w3}}")
 
         embed.add_field(
             name="\u200b",
-            value=f"Showing {len(controllers)}/{len(controllers)}",
+            value=f"```\n{chr(10).join(table_lines)}\n```",
             inline=False
         )
 
-        embed.set_footer(text="AkasaAirVirtual • Infinite Flight Live")
+        embed.set_footer(text=f"Showing {len(controllers)}/{len(controllers)} • AkasaAirVirtual • Infinite Flight Live")
 
         view = discord.ui.View(timeout=120)
         if map_lat is not None and map_lng is not None:
