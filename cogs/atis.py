@@ -100,7 +100,14 @@ class ATISServerSelect(discord.ui.Select):
                     if resp.status == 200:
                         weather_data = await resp.json()
                         w = weather_data.get("result", {})
-                        metar_text = w.get("metar") or w.get("raw")
+                        # Try all known field names the IF API may use
+                        metar_text = (
+                            w.get("metar")
+                            or w.get("raw")
+                            or w.get("rawMetar")
+                            or w.get("rawMETAR")
+                            or w.get("observation")
+                        )
             except Exception:
                 pass
 
@@ -110,23 +117,9 @@ class ATISServerSelect(discord.ui.Select):
             color=SERVER_COLORS.get(server_choice, discord.Color.orange())
         )
 
-        embed.add_field(
-            name="🖥️ Server",
-            value=server_choice,
-            inline=True
-        )
-
-        embed.add_field(
-            name="🛫 Airport",
-            value=airport,
-            inline=True
-        )
-
-        embed.add_field(
-            name="\u200b",
-            value="\u200b",
-            inline=True
-        )
+        embed.add_field(name="🖥️ Server", value=server_choice, inline=True)
+        embed.add_field(name="🛫 Airport", value=airport, inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
 
         embed.add_field(
             name="📢 ATIS Information",
@@ -144,8 +137,11 @@ class ATISServerSelect(discord.ui.Select):
             text=f"AkasaAirVirtual • Infinite Flight Live • {server_choice} Server"
         )
 
-        # Public — visible to the whole channel
-        await interaction.followup.send(embed=embed, ephemeral=False)
+        # Send public message directly to the channel so everyone can see it
+        await interaction.channel.send(embed=embed)
+
+        # Acknowledge the ephemeral interaction silently
+        await interaction.followup.send("✅ ATIS posted!", ephemeral=True)
 
 
 class ATISServerSelectView(discord.ui.View):
