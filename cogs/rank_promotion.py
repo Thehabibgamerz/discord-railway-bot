@@ -17,7 +17,7 @@ RANKS = [
         "name": "Second Officer",
         "role_id": 1389830256751415346,
         "hours": "25–85 hours",
-        "aircraft": "A321 / B738 / B739 / E175 / E190 / CRJ",
+        "aircraft": "A321 / B738 / B739 / E175 / E190",
         "emoji": "🟠"
     },
     {
