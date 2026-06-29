@@ -231,6 +231,20 @@ class RankSelect(discord.ui.Select):
         except discord.Forbidden:
             dm_sent = False
 
+        GENERAL_CHAT_ID = 1389839917118656543
+
+        # Send public congrats message in general chat
+        general_chat = guild.get_channel(GENERAL_CHAT_ID)
+        if general_chat:
+            try:
+                await general_chat.send(
+                    f"✈️ Congratulations {self.member.mention} on your promotion to "
+                    f"**{new_rank['name']}** at **Akasa Air Virtual**! "
+                    f"Well deserved — keep up the great flying! 🎉"
+                )
+            except discord.Forbidden:
+                pass
+
         # Confirm to staff
         confirm = f"✅ {self.member.mention} has been promoted to **{new_rank['name']}**."
         if not dm_sent:
