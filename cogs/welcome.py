@@ -4,15 +4,31 @@ from discord.ext import commands
 WELCOME_CHANNEL_ID = 1389838941414232214
 RECRUIT_ROLE_ID = 1389877024406896762
 
-BANNER_URL = "https://cdn.discordapp.com/attachments/1475055183489663158/1521009221532123216/Copy_of_QPVA_Support_20260629_095446_0000.jpg?ex=6a4345b9&is=6a41f439&hm=8033631e38f984b5782fceb458c2066dcac77b1900147a2de91a808187c13622&"
-# ⚠️ Replace the above URL with your actual banner image URL.
-# Upload your banner to imgur.com or Discord (right-click → Copy Link)
-# and paste it above.
+BANNER_URL = "https://cdn.discordapp.com/attachments/1475055183489663158/1521102855858028655/Copy_of_QPVA_Support_20260629_160931_0000.jpg?ex=6a439ced&is=6a424b6d&hm=2e26059b3a862e2065fd97bc86d7c3ef74f9700f4f5cabd902625ce606f6bc7a&"
+# ⚠️ Replace with your actual banner image URL (upload to imgur or Discord)
+
+
+GOODBYE_CHANNEL_ID = 1389842080767148052
 
 
 class Welcome(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        channel = member.guild.get_channel(GOODBYE_CHANNEL_ID)
+        if not channel:
+            return
+        try:
+            await channel.send(
+                f"✈️ **{member.mention}** ({member.name}) has left the server. "
+                f"We wish them safe skies ahead. 🇮🇳"
+            )
+        except discord.Forbidden:
+            pass
+        except discord.HTTPException:
+            pass
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
@@ -41,32 +57,28 @@ class Welcome(commands.Cog):
                 color=discord.Color.orange()
             )
 
+            # Banner image — no thumbnail on server embed
             embed.set_image(url=BANNER_URL)
-            embed.set_thumbnail(url=member.display_avatar.url)
 
             embed.add_field(
                 name="📌 Before You Start",
                 value=(
-                    "• Read our rules in <#1389838715647692900>\n"
-                    "• Review important info in the info channels\n"
-                    "• Open a recruitment ticket to apply"
+                    f"• Read our rules: <#1389836240278519890>\n"
+                    f"• Review important info: <#1389839170167373975>\n"
+                    f"• Open a recruitment ticket: <#1479253647643775006>"
                 ),
                 inline=False
             )
 
             embed.add_field(
                 name="🚀 Getting Started",
-                value=(
-                    "• Get your callsign assigned by staff\n"
-                    "• Check the rank structure channel\n"
-                    "• Join a group flight or start flying solo"
-                ),
+                value="Our staff team will guide you through the onboarding process.",
                 inline=False
             )
 
             embed.add_field(
                 name="❓ Need Help?",
-                value="Open a ticket in our support channel and our staff team will assist you.",
+                value="Open a ticket and our staff team will assist you.",
                 inline=False
             )
 
@@ -98,6 +110,7 @@ class Welcome(commands.Cog):
             color=discord.Color.orange()
         )
 
+        # Banner + server icon thumbnail on DM
         dm_embed.set_image(url=BANNER_URL)
         dm_embed.set_thumbnail(url=member.guild.icon.url if member.guild.icon else None)
 
@@ -136,7 +149,7 @@ class Welcome(commands.Cog):
         try:
             await member.send(embed=dm_embed)
         except discord.Forbidden:
-            pass  # Member has DMs closed — not an error worth logging loudly
+            pass  # Member has DMs closed
 
 
 async def setup(bot):
