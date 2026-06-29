@@ -10,42 +10,42 @@ RANKS = [
         "name": "Trainee Pilot",
         "role_id": 1389826912351948840,
         "hours": "0–25 hours",
-        "aircraft": "B38M / B737 / A220 / A319 / Dash 8Q400",
+        "aircraft": "B38M / B737 / A320 / A319 / Dash 8Q400",
         "emoji": "🟠"
     },
     {
         "name": "Second Officer",
         "role_id": 1389830256751415346,
         "hours": "25–85 hours",
-        "aircraft": "A321 / B738 / B379 / E175 / E190 / CRJ",
+        "aircraft": "A321 / B738 / B739 / E175 / E190 / CRJ",
         "emoji": "🟠"
     },
     {
         "name": "First Officer",
         "role_id": 1389830388217680022,
         "hours": "85–190 hours",
-        "aircraft": "B767 / B757 / A333 / A339",
+        "aircraft": "B757 / A332 / A333 / A338 / A339",
         "emoji": "🟠"
     },
     {
         "name": "Senior First Officer",
         "role_id": 1389830625669939220,
         "hours": "190–300 hours",
-        "aircraft": "B788 / B789 / B78X",
+        "aircraft": "B767 / B788 / B789 / B78X",
         "emoji": "🟡"
     },
     {
         "name": "Captain",
         "role_id": 1389830747455623219,
         "hours": "300–550 hours",
-        "aircraft": "B77L / B77W / B772 / B744 / A346",
+        "aircraft": "B77L / B77W / B772 / B77F / B744 / A346",
         "emoji": "🟡"
     },
     {
         "name": "Senior Captain",
         "role_id": 1389830897594798090,
         "hours": "550–700 hours",
-        "aircraft": "A359 / B478",
+        "aircraft": "A359 / B748",
         "emoji": "🟡"
     },
     {
