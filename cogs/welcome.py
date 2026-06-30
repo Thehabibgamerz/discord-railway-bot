@@ -4,7 +4,7 @@ from discord.ext import commands
 WELCOME_CHANNEL_ID = 1389838941414232214
 RECRUIT_ROLE_ID = 1389877024406896762
 
-BANNER_URL = "https://cdn.discordapp.com/attachments/1475055183489663158/1521102855858028655/Copy_of_QPVA_Support_20260629_160931_0000.jpg?ex=6a439ced&is=6a424b6d&hm=2e26059b3a862e2065fd97bc86d7c3ef74f9700f4f5cabd902625ce606f6bc7a&"
+BANNER_URL = "https://cdn.discordapp.com/attachments/1475055183489663158/1521461739600740352/Copy_of_QPVA_Support_20260630_155215_0000.png?ex=6a44eb2a&is=6a4399aa&hm=5c4dcd21bb3848b5a0400b42b2d0908cfeedc6f4c5d247fcbae555ba29d153d1&"
 # ⚠️ Replace with your actual banner image URL (upload to imgur or Discord)
 
 
