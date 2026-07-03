@@ -160,16 +160,15 @@ class Counting(commands.Cog):
             )
             return
 
-        # Same user counting twice in a row
+        # Same user counting twice in a row — warn only, no reset
         if info["last_user_id"] == message.author.id:
-            await message.add_reaction("❌")
-            info["count"] = 0
-            info["last_user_id"] = None
-            self._save_all()
+            await message.add_reaction("⚠️")
             await message.channel.send(
-                f"❌ {message.author.mention} counted twice in a row! "
-                f"Wait for someone else. Starting over from **1**."
+                f"⚠️ {message.author.mention} you can't count twice in a row! "
+                f"Wait for someone else. The count is still at **{info['count']}**.",
+                delete_after=5
             )
+            await message.delete()
             return
 
         # Correct number
