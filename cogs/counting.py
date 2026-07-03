@@ -166,7 +166,7 @@ class Counting(commands.Cog):
             await message.channel.send(
                 f"⚠️ {message.author.mention} you can't count twice in a row! "
                 f"Wait for someone else. The count is still at **{info['count']}**.",
-                delete_after=5
+                delete_after=10
             )
             await message.delete()
             return
