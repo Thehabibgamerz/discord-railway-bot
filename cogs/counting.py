@@ -150,12 +150,11 @@ class Counting(commands.Cog):
         # Wrong number
         if sent != expected:
             await message.add_reaction("❌")
-            previous_count = info["count"]
             info["count"] = 0
             info["last_user_id"] = None
             self._save_all()
             await message.channel.send(
-                f"❌ {message.author.mention} ruined it at **{previous_count}**! "
+                f"❌ {message.author.mention} ruined it at **{info['count'] + sent - sent}**! "
                 f"The number should have been **{expected}**. "
                 f"Starting over from **1**."
             )
