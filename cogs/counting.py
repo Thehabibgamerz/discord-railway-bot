@@ -1,36 +1,62 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import json
+from supabase import create_client, Client
 import os
 
 STAFF_ROLE_ID = 1389824693388837035
-
-DATA_FILE = os.path.join(os.path.dirname(__file__), "counting.json")
-
-
-# ================= PERSISTENCE =================
-
-def load_data() -> dict:
-    if not os.path.exists(DATA_FILE):
-        return {}
-    try:
-        with open(DATA_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+SUPABASE_URL = "https://xljanwcgesjhdoaavmuo.supabase.co"
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
 
-def save_data(data: dict):
-    try:
-        with open(DATA_FILE, "w") as f:
-            json.dump(data, f, indent=4)
-    except Exception:
-        pass
+def get_db() -> Client:
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 def is_staff(member: discord.Member) -> bool:
     return any(role.id == STAFF_ROLE_ID for role in member.roles)
+
+
+# ================= SUPABASE HELPERS =================
+
+def db_get(guild_id: int):
+    try:
+        res = get_db().table("counting").select("*").eq("guild_id", guild_id).single().execute()
+        return res.data
+    except Exception:
+        return None
+
+
+def db_setup(guild_id: int, channel_id: int):
+    db = get_db()
+    existing = db_get(guild_id)
+    if existing:
+        db.table("counting").update({
+            "channel_id": channel_id,
+            "count": 0,
+            "last_user_id": None
+        }).eq("guild_id", guild_id).execute()
+    else:
+        db.table("counting").insert({
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "count": 0,
+            "last_user_id": None
+        }).execute()
+
+
+def db_update(guild_id: int, count: int, last_user_id):
+    get_db().table("counting").update({
+        "count": count,
+        "last_user_id": last_user_id
+    }).eq("guild_id", guild_id).execute()
+
+
+def db_reset(guild_id: int):
+    get_db().table("counting").update({
+        "count": 0,
+        "last_user_id": None
+    }).eq("guild_id", guild_id).execute()
 
 
 # ================= COG =================
@@ -38,30 +64,8 @@ def is_staff(member: discord.Member) -> bool:
 class Counting(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # In-memory state: {guild_id: {channel_id, count, last_user_id}}
-        self.state: dict = {}
-        self._load_all()
 
-    def _load_all(self):
-        data = load_data()
-        for guild_id, info in data.items():
-            self.state[int(guild_id)] = {
-                "channel_id": info.get("channel_id"),
-                "count": info.get("count", 0),
-                "last_user_id": info.get("last_user_id")
-            }
-
-    def _save_all(self):
-        save_data({
-            str(gid): {
-                "channel_id": info["channel_id"],
-                "count": info["count"],
-                "last_user_id": info["last_user_id"]
-            }
-            for gid, info in self.state.items()
-        })
-
-    # ================= SETUP COMMAND =================
+    # ================= SETUP =================
 
     @app_commands.command(name="counting_setup", description="Set up the counting game channel (staff only)")
     @app_commands.describe(channel="The channel to use for counting")
@@ -71,12 +75,7 @@ class Counting(commands.Cog):
                 "❌ Only staff can set up the counting game.", ephemeral=True
             )
 
-        self.state[interaction.guild.id] = {
-            "channel_id": channel.id,
-            "count": 0,
-            "last_user_id": None
-        }
-        self._save_all()
+        db_setup(interaction.guild.id, channel.id)
 
         embed = discord.Embed(
             title="🔢 Counting Game Set Up!",
@@ -93,11 +92,9 @@ class Counting(commands.Cog):
         embed.set_footer(text="AkasaAirVirtual • Counting Game")
 
         await interaction.response.send_message(embed=embed)
-        await channel.send(
-            "🔢 **Counting game started!** Type **1** to begin."
-        )
+        await channel.send("🔢 **Counting game started!** Type **1** to begin.")
 
-    # ================= RESET COMMAND =================
+    # ================= RESET =================
 
     @app_commands.command(name="counting_reset", description="Manually reset the counting game (staff only)")
     async def counting_reset(self, interaction: discord.Interaction):
@@ -106,15 +103,13 @@ class Counting(commands.Cog):
                 "❌ Only staff can reset the counting game.", ephemeral=True
             )
 
-        info = self.state.get(interaction.guild.id)
+        info = db_get(interaction.guild.id)
         if not info:
             return await interaction.response.send_message(
                 "⚠️ Counting game is not set up. Use `/counting_setup` first.", ephemeral=True
             )
 
-        info["count"] = 0
-        info["last_user_id"] = None
-        self._save_all()
+        db_reset(interaction.guild.id)
 
         channel = self.bot.get_channel(info["channel_id"])
         if channel:
@@ -132,7 +127,8 @@ class Counting(commands.Cog):
         if not message.guild:
             return
 
-        info = self.state.get(message.guild.id)
+        # Fetch state from Supabase on every message in the right channel
+        info = db_get(message.guild.id)
         if not info:
             return
 
@@ -144,40 +140,38 @@ class Counting(commands.Cog):
         if not content.lstrip("-").isdigit():
             return
 
-        expected = info["count"] + 1
+        count = info["count"]
+        last_user_id = info["last_user_id"]
+        expected = count + 1
         sent = int(content)
 
-        # Wrong number
+        # Wrong number — reset
         if sent != expected:
             await message.add_reaction("❌")
-            info["count"] = 0
-            info["last_user_id"] = None
-            self._save_all()
+            db_reset(message.guild.id)
             await message.channel.send(
-                f"❌ {message.author.mention} ruined it at **{info['count'] + sent - sent}**! "
+                f"❌ {message.author.mention} ruined it at **{count}**! "
                 f"The number should have been **{expected}**. "
                 f"Starting over from **1**."
             )
             return
 
         # Same user counting twice in a row — warn only, no reset
-        if info["last_user_id"] == message.author.id:
+        if last_user_id and int(last_user_id) == message.author.id:
             await message.add_reaction("⚠️")
             await message.channel.send(
-                f"⚠️ {message.author.mention} you can't count twice in a row! "
-                f"Wait for someone else. The count is still at **{info['count']}**.",
-                delete_after=10
+                f"⚠️ {message.author.mention} you cannot count twice in a row! "
+                f"Wait for someone else. The count is still at **{count}**.",
+                delete_after=5
             )
             await message.delete()
             return
 
         # Correct number
-        info["count"] = sent
-        info["last_user_id"] = message.author.id
-        self._save_all()
+        db_update(message.guild.id, sent, message.author.id)
         await message.add_reaction("✅")
 
-        # Milestone messages every 100
+        # Milestone every 100
         if sent % 100 == 0:
             await message.channel.send(
                 f"🎉 **{sent}!** Amazing work everyone — keep it going!"
