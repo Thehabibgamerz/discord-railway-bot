@@ -4,6 +4,7 @@ from discord import app_commands
 from discord.ui import View, Button
 from supabase import create_client, Client
 import os
+import time
 
 SUPABASE_URL = "https://xljanwcgesjhdoaavmuo.supabase.co"
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
@@ -159,6 +160,7 @@ def build_question_embed(user_id: int) -> discord.Embed:
     q_index = session["q_index"]
     q = QUESTIONS[q_index]
     total = len(QUESTIONS)
+    deadline = session.get("question_deadline", 0)
 
     embed = discord.Embed(
         title=f"✍️ Akasa Air Virtual — Written Test",
@@ -172,6 +174,12 @@ def build_question_embed(user_id: int) -> discord.Embed:
             value=opt,
             inline=False
         )
+
+    embed.add_field(
+        name="⏱️ Time Remaining",
+        value=f"<t:{deadline}:R>" if deadline else "120 seconds",
+        inline=False
+    )
 
     embed.set_footer(
         text=f"Score so far: {session['score']}/{q_index} • AkasaAirVirtual Written Test"
@@ -244,9 +252,10 @@ class QuestionView(View):
 
             # Move to next question or finish
             if session["q_index"] < len(QUESTIONS):
+                session["question_deadline"] = int(time.time()) + QUESTION_TIMEOUT
                 next_embed = build_question_embed(self.user_id)
                 next_view = QuestionView(self.user_id, self.guild_id)
-                await interaction.followup.send(embed=next_embed, view=next_view, ephemeral=True)
+                await interaction.followup.send(embed=next_embed, view=next_view, ephemeral=False)
             else:
                 await self._finish_test(interaction)
 
@@ -332,28 +341,29 @@ class WrittenTest(commands.Cog):
             "q_index": 0,
             "score": 0,
             "answers": [],
-            "guild_id": interaction.guild.id
+            "guild_id": interaction.guild.id,
+            "question_deadline": int(time.time()) + QUESTION_TIMEOUT
         }
 
         intro_embed = discord.Embed(
             title="✍️ Akasa Air Virtual — Written Test",
             description=(
-                "Welcome to the **Akasa Air Virtual Written Test**!\n\n"
+                f"Welcome <@{interaction.user.id}> to the **Akasa Air Virtual Written Test**!\n\n"
                 f"📋 **{len(QUESTIONS)} questions** covering aviation knowledge and Akasa Air.\n"
-                f"✅ **Pass mark:** {PASS_SCORE}/{len(QUESTIONS)} ({round(PASS_SCORE/len(QUESTIONS)*100)}%)\n"
+                f"✅ **Pass mark:** {PASS_SCORE}/{len(QUESTIONS)} (81%)\n"
                 f"⏱️ **120 seconds** per question.\n\n"
-                "Only you can see this test. Answer each question carefully.\n"
+                "Answer each question carefully. Only you can click your own buttons.\n"
                 "Good luck! ✈️"
             ),
             color=discord.Color.orange()
         )
         intro_embed.set_footer(text="AkasaAirVirtual • Written Test")
 
-        await interaction.response.send_message(embed=intro_embed, ephemeral=True)
+        await interaction.response.send_message(embed=intro_embed, ephemeral=False)
 
         first_embed = build_question_embed(interaction.user.id)
         first_view = QuestionView(interaction.user.id, interaction.guild.id)
-        await interaction.followup.send(embed=first_embed, view=first_view, ephemeral=True)
+        await interaction.followup.send(embed=first_embed, view=first_view, ephemeral=False)
 
     def user_id_in_session(self, user_id: int) -> bool:
         return user_id in active_sessions
