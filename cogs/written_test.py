@@ -11,6 +11,7 @@ SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 STAFF_ROLE_ID = 1389824693388837035
 
 PASS_SCORE = 13  # out of 16 to pass (81%)
+QUESTION_TIMEOUT = 120  # seconds per question
 
 
 def get_db() -> Client:
