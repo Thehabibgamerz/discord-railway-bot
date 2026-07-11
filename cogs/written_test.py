@@ -201,8 +201,7 @@ def db_get_user_score(guild_id: int, user_id: int):
         return res.data
     except Exception:
         return None
-
-
+        
 # ================= QUESTION VIEW =================
 
 def build_question_embed(user_id: int) -> discord.Embed:
@@ -485,4 +484,171 @@ class QuestionView(View):
                 f"<@{self.user_id}> did not reach the pass mark. You need **{PASS_SCORE}/{total_q}** correct."
             )
 
-            embed = discord.Embed(title=f"📋 Written Test Complete — {result_title}", description=resu
+            embed = discord.Embed(title=f"📋 Written Test Complete — {result_title}", description=result_desc, color=color)
+            embed.add_field(name="🎯 Score", value=f"**{score} / {total_q}**", inline=True)
+            embed.add_field(name="📊 Percentage", value=f"**{percentage}%**", inline=True)
+            embed.add_field(name="✅ Pass Mark", value=f"**{PASS_SCORE}/{total_q}**", inline=True)
+            skipped = sum(1 for a in answers if a["chosen"] is None)
+            if skipped:
+                embed.add_field(name=f"⏩ Skipped ({skipped})", value=f"{skipped} question(s) timed out.", inline=False)
+            embed.add_field(name="\u200b", value="⚠️ All question messages will be deleted in **5 minutes**.", inline=False)
+            embed.set_footer(text="AkasaAirVirtual • Written Test")
+
+            channel = self.message.channel if self.message else None
+            if channel:
+                try:
+                    await channel.send(embed=embed)
+                    message_ids = session_copy.get("message_ids", [])
+                    bot = channel.guild._state._get_client()
+                    asyncio.get_event_loop().create_task(
+                        QuestionView._delete_messages_later(bot, channel.id, message_ids)
+                    )
+                except Exception:
+                    pass
+
+# ================= COG =================
+
+class WrittenTest(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @app_commands.command(name="startwrittentest", description="Start the Akasa Air Virtual written test")
+    async def startwrittentest(self, interaction: discord.Interaction):
+        if self.user_id_in_session(interaction.user.id):
+            return await interaction.response.send_message(
+                "⚠️ You already have an active test session! Answer the current question first.",
+                ephemeral=True
+            )
+
+        active_sessions[interaction.user.id] = {
+            "q_index": 0,
+            "score": 0,
+            "answers": [],
+            "guild_id": interaction.guild.id,
+            "channel_id": interaction.channel.id,
+            "message_ids": [],
+            "questions": random.sample(QUESTIONS, min(QUESTIONS_PER_TEST, len(QUESTIONS))),
+            "question_deadline": int(time.time()) + QUESTION_TIMEOUT
+        }
+
+        session = active_sessions[interaction.user.id]
+        total_q = len(session["questions"])
+
+        intro_embed = discord.Embed(
+            title="✍️ Akasa Air Virtual — Written Test",
+            description=(
+                f"Welcome <@{interaction.user.id}> to the **Akasa Air Virtual Written Test**!\n\n"
+                f"📋 **{total_q} questions** covering aviation knowledge and Akasa Air.\n"
+                f"✅ **Pass mark:** {PASS_SCORE} correct answers\n"
+                f"⏱️ **{QUESTION_TIMEOUT} seconds** per question — unanswered questions auto-skip.\n\n"
+                "Only you can click your own buttons.\n"
+                "Good luck! ✈️"
+            ),
+            color=discord.Color.orange()
+        )
+        intro_embed.set_footer(text="AkasaAirVirtual • Written Test")
+
+        await interaction.response.send_message(embed=intro_embed, ephemeral=False)
+        intro_msg = await interaction.original_response()
+        session["message_ids"].append(intro_msg.id)
+
+        first_embed = build_question_embed(interaction.user.id)
+        first_view = QuestionView(interaction.user.id, interaction.guild.id)
+        first_msg = await interaction.followup.send(embed=first_embed, view=first_view, ephemeral=False)
+        first_view.message = first_msg
+        session["message_ids"].append(first_msg.id)
+
+    def user_id_in_session(self, user_id: int) -> bool:
+        return user_id in active_sessions
+
+    # ================= MY SCORE =================
+
+    @app_commands.command(name="mytestscore", description="Check your written test score")
+    async def mytestscore(self, interaction: discord.Interaction):
+        row = db_get_user_score(interaction.guild.id, interaction.user.id)
+
+        if not row:
+            return await interaction.response.send_message(
+                "⚠️ You haven't taken the written test yet. Run `/startwrittentest` to begin!",
+                ephemeral=True
+            )
+
+        embed = discord.Embed(
+            title="📋 Your Written Test Score",
+            color=discord.Color.green() if row["passed"] else discord.Color.red()
+        )
+        embed.add_field(name="🏅 Best Score", value=f"**{row['best_score']}/{QUESTIONS_PER_TEST}**", inline=True)
+        embed.add_field(name="📊 Last Score", value=f"**{row['last_score']}/{QUESTIONS_PER_TEST}**", inline=True)
+        embed.add_field(name="🔄 Attempts", value=str(row["attempts"]), inline=True)
+        embed.add_field(name="Result", value="✅ PASSED" if row["passed"] else "❌ Not yet passed", inline=True)
+        embed.set_footer(text="AkasaAirVirtual • Written Test")
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    # ================= LEADERBOARD =================
+
+    @app_commands.command(name="testleaderboard", description="Show the written test leaderboard")
+    async def testleaderboard(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+
+        rows = db_get_leaderboard(interaction.guild.id)
+
+        if not rows:
+            return await interaction.followup.send(
+                "⚠️ No scores yet — run `/startwrittentest` to take the test!"
+            )
+
+        embed = discord.Embed(
+            title="🏆 Written Test — Leaderboard",
+            description="Ranked by best score",
+            color=discord.Color.orange()
+        )
+
+        medals = ["🥇", "🥈", "🥉"]
+        lines = []
+
+        for i, row in enumerate(rows):
+            member = interaction.guild.get_member(row["user_id"])
+            name = member.display_name if member else f"<@{row['user_id']}>"
+            medal = medals[i] if i < 3 else f"**#{i + 1}**"
+            status = "✅" if row["passed"] else "❌"
+            lines.append(
+                f"{medal} {name} — **{row['best_score']}/{QUESTIONS_PER_TEST}** {status} · {row['attempts']} attempt{'s' if row['attempts'] != 1 else ''}"
+            )
+
+        embed.description = "\n".join(lines)
+        embed.set_footer(text="AkasaAirVirtual • Written Test")
+
+        await interaction.followup.send(embed=embed)
+
+    # ================= VIEW RESULTS (staff) =================
+
+    @app_commands.command(name="viewtestresult", description="View a member's test results (staff only)")
+    @app_commands.describe(member="The member to look up")
+    async def viewtestresult(self, interaction: discord.Interaction, member: discord.Member):
+        if not is_staff(interaction.user):
+            return await interaction.response.send_message("❌ Staff only.", ephemeral=True)
+
+        row = db_get_user_score(interaction.guild.id, member.id)
+
+        if not row:
+            return await interaction.response.send_message(
+                f"⚠️ {member.mention} has not taken the written test yet.", ephemeral=True
+            )
+
+        embed = discord.Embed(
+            title=f"📋 Test Results — {member.display_name}",
+            color=discord.Color.green() if row["passed"] else discord.Color.red()
+        )
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.add_field(name="🏅 Best Score", value=f"**{row['best_score']}/{QUESTIONS_PER_TEST}**", inline=True)
+        embed.add_field(name="📊 Last Score", value=f"**{row['last_score']}/{QUESTIONS_PER_TEST}**", inline=True)
+        embed.add_field(name="🔄 Attempts", value=str(row["attempts"]), inline=True)
+        embed.add_field(name="Result", value="✅ PASSED" if row["passed"] else "❌ Not yet passed", inline=True)
+        embed.set_footer(text="AkasaAirVirtual • Written Test")
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+async def setup(bot):
+    await bot.add_cog(WrittenTest(bot))
