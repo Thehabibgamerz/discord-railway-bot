@@ -8,7 +8,7 @@ from supabase import create_client, Client
 
 # Initialize Supabase
 supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = osenv.get("SUPABASE_KEY")
+supabase_key = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(supabase_url, supabase_key)
 
 class PilotDatabase(commands.Cog):
@@ -34,6 +34,9 @@ class PilotDatabase(commands.Cog):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
+        # Get pilot count
+        pilot_count = await self.get_pilot_count()
+        
         # Create the main embed
         embed = discord.Embed(
             title="✈️ Pilot Database",
@@ -43,7 +46,7 @@ class PilotDatabase(commands.Cog):
         
         embed.add_field(
             name="📋 Database Info",
-            value=f"• **Total Pilots:** `{await self.get_pilot_count()}`\n• **Last Updated:** <t:{int(discord.utils.utcnow().timestamp())}:R>",
+            value=f"• **Total Pilots:** `{pilot_count}`\n• **Last Updated:** <t:{int(discord.utils.utcnow().timestamp())}:R>",
             inline=False
         )
         
@@ -54,23 +57,26 @@ class PilotDatabase(commands.Cog):
         )
         
         embed.set_footer(text="Pilot Database System • Executive Access Only")
-        embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else None)
+        if interaction.guild and interaction.guild.icon:
+            embed.set_thumbnail(url=interaction.guild.icon.url)
         
-        # Create buttons
-        view = PilotDatabaseView()
+        # Create buttons - Pass supabase to the view
+        view = PilotDatabaseView(supabase)
         
         await interaction.response.send_message(embed=embed, view=view)
     
     async def get_pilot_count(self):
         try:
-            response = supabase.table("pilots").select("count", count="exact").execute()
-            return response.count
-        except:
+            response = supabase.table("pilots").select("*", count="exact").execute()
+            return response.count if hasattr(response, 'count') else len(response.data)
+        except Exception as e:
+            print(f"Error getting pilot count: {e}")
             return 0
 
 class PilotDatabaseView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, supabase_client):
         super().__init__(timeout=None)
+        self.supabase = supabase_client  # Store supabase client as instance variable
     
     @discord.ui.button(
         label="🔍 Search Pilot",
@@ -78,8 +84,7 @@ class PilotDatabaseView(discord.ui.View):
         custom_id="search_pilot"
     )
     async def search_pilot_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Create a modal for searching
-        modal = SearchPilotModal()
+        modal = SearchPilotModal(self.supabase)
         await interaction.response.send_modal(modal)
     
     @discord.ui.button(
@@ -88,7 +93,7 @@ class PilotDatabaseView(discord.ui.View):
         custom_id="add_pilot"
     )
     async def add_pilot_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        modal = AddPilotModal()
+        modal = AddPilotModal(self.supabase)
         await interaction.response.send_modal(modal)
     
     @discord.ui.button(
@@ -101,7 +106,7 @@ class PilotDatabaseView(discord.ui.View):
     
     async def show_all_pilots(self, interaction: discord.Interaction):
         try:
-            response = supabase.table("pilots").select("*").execute()
+            response = self.supabase.table("pilots").select("*").execute()
             pilots = response.data
             
             if not pilots:
@@ -113,13 +118,16 @@ class PilotDatabaseView(discord.ui.View):
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
             
-            # Create paginated pages (10 pilots per page)
+            # Create paginated pages (6 pilots per page for better formatting)
             pages = []
-            for i in range(0, len(pilots), 10):
-                page_pilots = pilots[i:i+10]
+            page_count = (len(pilots) - 1) // 6 + 1
+            
+            for i in range(0, len(pilots), 6):
+                page_num = i // 6 + 1
+                page_pilots = pilots[i:i+6]
                 embed = discord.Embed(
                     title="📋 All Pilots",
-                    description=f"Page {len(pages)+1}/{(len(pilots)-1)//10 + 1}",
+                    description=f"Page {page_num}/{page_count} • Total: {len(pilots)} pilots",
                     color=discord.Color.blue()
                 )
                 
@@ -133,7 +141,7 @@ class PilotDatabaseView(discord.ui.View):
                 pages.append(embed)
             
             # Send first page with pagination
-            view = PaginationView(pages, 0)
+            view = PaginationView(pages, 0, self.supabase)
             await interaction.response.send_message(embed=pages[0], view=view, ephemeral=True)
             
         except Exception as e:
@@ -145,6 +153,10 @@ class PilotDatabaseView(discord.ui.View):
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
 class SearchPilotModal(discord.ui.Modal, title="Search Pilot"):
+    def __init__(self, supabase_client):
+        super().__init__()
+        self.supabase = supabase_client
+    
     search_query = discord.ui.TextInput(
         label="Search by Callsign or Name",
         placeholder="Enter callsign or pilot name...",
@@ -157,7 +169,7 @@ class SearchPilotModal(discord.ui.Modal, title="Search Pilot"):
         
         try:
             # Search in database
-            response = supabase.table("pilots")\
+            response = self.supabase.table("pilots")\
                 .select("*")\
                 .or_(f"callsign.ilike.%{query}%,name.ilike.%{query}%")\
                 .execute()
@@ -201,6 +213,10 @@ class SearchPilotModal(discord.ui.Modal, title="Search Pilot"):
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
 class AddPilotModal(discord.ui.Modal, title="Add New Pilot"):
+    def __init__(self, supabase_client):
+        super().__init__()
+        self.supabase = supabase_client
+    
     callsign = discord.ui.TextInput(
         label="Callsign",
         placeholder="e.g., SPEED01",
@@ -245,7 +261,7 @@ class AddPilotModal(discord.ui.Modal, title="Add New Pilot"):
             }
             
             # Insert into Supabase
-            response = supabase.table("pilots").insert(pilot_data).execute()
+            response = self.supabase.table("pilots").insert(pilot_data).execute()
             
             embed = discord.Embed(
                 title="✅ Pilot Added Successfully!",
@@ -264,10 +280,11 @@ class AddPilotModal(discord.ui.Modal, title="Add New Pilot"):
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
 class PaginationView(discord.ui.View):
-    def __init__(self, pages, current_page=0):
+    def __init__(self, pages, current_page=0, supabase_client=None):
         super().__init__(timeout=60)
         self.pages = pages
         self.current_page = current_page
+        self.supabase = supabase_client
         
         # Update button states
         self.prev_button.disabled = self.current_page == 0
