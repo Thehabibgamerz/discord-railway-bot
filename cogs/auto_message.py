@@ -274,16 +274,43 @@ class AutoMessage(commands.Cog):
     @tasks.loop(seconds=60)
     async def check_schedules(self):
         now = datetime.now(timezone.utc)
-        for s in db_get_all_schedules_global():
+        try:
+            schedules = db_get_all_schedules_global()
+        except Exception:
+            return  # DB unreachable — skip this tick, try again in 60s
+
+        for s in schedules:
             try:
-                last_sent = datetime.fromisoformat(s["last_sent"])
-                if (now - last_sent).total_seconds() >= s["interval_seconds"]:
-                    channel = self.bot.get_channel(s["channel_id"])
+                last_sent_raw = s.get("last_sent")
+                if not last_sent_raw:
+                    continue
+
+                # Normalise to timezone-aware UTC regardless of format Supabase returns
+                last_sent = datetime.fromisoformat(
+                    last_sent_raw.replace("Z", "+00:00")
+                )
+                if last_sent.tzinfo is None:
+                    last_sent = last_sent.replace(tzinfo=timezone.utc)
+
+                elapsed = (now - last_sent).total_seconds()
+
+                if elapsed >= s["interval_seconds"]:
+                    channel = self.bot.get_channel(int(s["channel_id"]))
                     if channel:
-                        await channel.send(s["message"])
+                        try:
+                            await channel.send(s["message"])
+                        except (discord.Forbidden, discord.HTTPException):
+                            pass
+                        # Always update last_sent even if send failed,
+                        # to prevent spam retries on a broken channel
                         db_update_last_sent(s["id"])
             except Exception:
-                continue
+                continue  # Never let one bad schedule kill the loop
+
+    @check_schedules.error
+    async def check_schedules_error(self, error):
+        # Restart the loop if it crashes unexpectedly
+        self.check_schedules.restart()
 
     @check_schedules.before_loop
     async def before_check(self):
