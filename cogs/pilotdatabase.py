@@ -6,6 +6,7 @@ from supabase import create_client, Client
 from datetime import datetime, timezone
 import os
 
+STAFF_ROLE_ID = 1389824693388837035
 EXEC_ROLE_ID = 1389824452778262589
 
 SUPABASE_URL = "https://xljanwcgesjhdoaavmuo.supabase.co"
@@ -16,8 +17,8 @@ def get_db() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-def is_exec(member: discord.Member) -> bool:
-    return any(role.id == EXEC_ROLE_ID for role in member.roles)
+def is_authorized(member: discord.Member) -> bool:
+    return any(role.id in (STAFF_ROLE_ID, EXEC_ROLE_ID) for role in member.roles)
 
 
 # ================= SUPABASE HELPERS =================
@@ -125,14 +126,19 @@ class AddPilotModal(Modal):
                 f"❌ A pilot with callsign **{callsign}** already exists.", ephemeral=True
             )
 
-        db_add_pilot(
-            discord_id=discord_id,
-            callsign=callsign,
-            rank=self.rank.value.strip(),
-            ifc_username=self.ifc_username.value.strip(),
-            join_date=self.join_date.value.strip(),
-            status="Active"
-        )
+        try:
+            db_add_pilot(
+                discord_id=discord_id,
+                callsign=callsign,
+                rank=self.rank.value.strip(),
+                ifc_username=self.ifc_username.value.strip(),
+                join_date=self.join_date.value.strip(),
+                status="Active"
+            )
+        except Exception as e:
+            return await interaction.response.send_message(
+                f"❌ Failed to add pilot. Error: `{e}`", ephemeral=True
+            )
 
         embed = discord.Embed(
             title="✅ Pilot Added",
@@ -145,7 +151,31 @@ class AddPilotModal(Modal):
         embed.add_field(name="📅 Join Date", value=self.join_date.value.strip(), inline=True)
         embed.add_field(name="📊 Status", value="🟢 Active", inline=True)
         embed.set_footer(text="AkasaAirVirtual • Pilot Database")
-        await interaction.response.send_message(embed=embed)
+
+        # Staff-only ephemeral confirmation
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        # Send DM to the added pilot
+        pilot_member = interaction.guild.get_member(discord_id)
+        if pilot_member:
+            dm_embed = discord.Embed(
+                title="✈️ You've Been Added to the Pilot Database!",
+                description=(
+                    f"Welcome, **{pilot_member.display_name}**!\n\n"
+                    "You have been officially registered in the **Akasa Air Virtual** pilot database."
+                ),
+                color=discord.Color.orange()
+            )
+            dm_embed.add_field(name="🪪 Callsign", value=callsign, inline=True)
+            dm_embed.add_field(name="🏅 Rank", value=self.rank.value.strip(), inline=True)
+            dm_embed.add_field(name="📅 Join Date", value=self.join_date.value.strip(), inline=True)
+            dm_embed.add_field(name="📊 Status", value="🟢 Active", inline=True)
+            dm_embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else None)
+            dm_embed.set_footer(text="AkasaAirVirtual • Welcome aboard! ✈️")
+            try:
+                await pilot_member.send(embed=dm_embed)
+            except discord.Forbidden:
+                pass  # Pilot has DMs closed
 
 
 class SearchPilotModal(Modal):
@@ -216,7 +246,7 @@ class EditPilotModal(Modal):
         updated = db_get_pilot_by_callsign(callsign)
         embed = build_pilot_embed(updated, interaction.guild)
         embed.title = f"✏️ Pilot Updated — {callsign}"
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 class DeletePilotModal(Modal):
@@ -251,7 +281,7 @@ class PilotDatabaseView(View):
         super().__init__(timeout=None)
 
     async def check_exec(self, interaction: discord.Interaction) -> bool:
-        if not is_exec(interaction.user):
+        if not is_authorized(interaction.user):
             await interaction.response.send_message(
                 "❌ Only the Executive Team can use this panel.", ephemeral=True
             )
@@ -341,7 +371,7 @@ class PilotDatabase(commands.Cog):
     @app_commands.command(name="pilotdatabase_panel", description="Send the Pilot Database panel (Executive Team only)")
     @app_commands.describe(channel="Channel to post the panel in")
     async def pilotdatabase_panel(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        if not is_exec(interaction.user):
+        if not is_authorized(interaction.user):
             return await interaction.response.send_message(
                 "❌ Only the Executive Team can send the pilot database panel.", ephemeral=True
             )
