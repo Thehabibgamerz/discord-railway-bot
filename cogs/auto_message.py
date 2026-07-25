@@ -276,8 +276,9 @@ class AutoMessage(commands.Cog):
         now = datetime.now(timezone.utc)
         try:
             schedules = db_get_all_schedules_global()
-        except Exception:
-            return  # DB unreachable — skip this tick, try again in 60s
+        except Exception as e:
+            print(f"[AutoMessage] DB fetch error: {e}")
+            return
 
         for s in schedules:
             try:
@@ -285,31 +286,50 @@ class AutoMessage(commands.Cog):
                 if not last_sent_raw:
                     continue
 
-                # Normalise to timezone-aware UTC regardless of format Supabase returns
-                last_sent = datetime.fromisoformat(
-                    last_sent_raw.replace("Z", "+00:00")
-                )
+                # Handle all formats Supabase may return:
+                # - "2026-07-13T10:00:00+00:00"
+                # - "2026-07-13T10:00:00Z"
+                # - "2026-07-13T10:00:00.123456+00:00"
+                # - "2026-07-13 10:00:00+00:00" (space instead of T)
+                normalized = last_sent_raw.replace("Z", "+00:00").replace(" ", "T")
+
+                # Strip microseconds if present to avoid fromisoformat issues
+                if "." in normalized:
+                    base, rest = normalized.split(".", 1)
+                    # keep timezone part after microseconds
+                    if "+" in rest:
+                        tz = "+" + rest.split("+", 1)[1]
+                    elif rest.endswith("+00:00"):
+                        tz = "+00:00"
+                    else:
+                        tz = "+00:00"
+                    normalized = base + tz
+
+                last_sent = datetime.fromisoformat(normalized)
                 if last_sent.tzinfo is None:
                     last_sent = last_sent.replace(tzinfo=timezone.utc)
 
                 elapsed = (now - last_sent).total_seconds()
 
-                if elapsed >= s["interval_seconds"]:
+                if elapsed >= int(s["interval_seconds"]):
                     channel = self.bot.get_channel(int(s["channel_id"]))
                     if channel:
                         try:
                             await channel.send(s["message"])
-                        except (discord.Forbidden, discord.HTTPException):
-                            pass
-                        # Always update last_sent even if send failed,
-                        # to prevent spam retries on a broken channel
+                            print(f"[AutoMessage] Sent schedule #{s['id']} to #{channel.name}")
+                        except (discord.Forbidden, discord.HTTPException) as e:
+                            print(f"[AutoMessage] Failed to send #{s['id']}: {e}")
+                        # Always update last_sent so it doesn't retry immediately
                         db_update_last_sent(s["id"])
-            except Exception:
-                continue  # Never let one bad schedule kill the loop
+                    else:
+                        print(f"[AutoMessage] Channel {s['channel_id']} not found for schedule #{s['id']}")
+            except Exception as e:
+                print(f"[AutoMessage] Error processing schedule #{s.get('id')}: {e}")
+                continue
 
     @check_schedules.error
     async def check_schedules_error(self, error):
-        # Restart the loop if it crashes unexpectedly
+        print(f"[AutoMessage] Loop crashed: {error} — restarting")
         self.check_schedules.restart()
 
     @check_schedules.before_loop
