@@ -2,27 +2,19 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from discord.ui import View, Button, Modal, TextInput
-import os
 
 STAFF_ROLE_ID = 1389824693388837035
 EXEC_ROLE_ID = 1389824452778262589
 
-# ================= MESSAGES =================
-
-MESSAGES = {
-    "written_test": {
-        "label": "Written Test",
-        "emoji": "📝",
-        "style": discord.ButtonStyle.primary,
-        "template": """## Pilot Written Test
+WRITTEN_TEST_MSG = """## Pilot Written Test
 
 Dear Applicant, {mention}
 
 Thank you for your interest in joining Akasa Air Virtual. Before proceeding, please complete the Pilot Written Test to help us assess your knowledge and readiness for operations.
 
-👉 **Written Test:** *If you're ready type `/startwrittentest` to start the test.*
+\U0001f449 **Written Test:** *If you're ready type `/startwrittentest` to start the test.*
 
-**Preparation Material — Please Read Carefully**
+**Preparation Material \u2014 Please Read Carefully**
 
 To ensure the best chance of success, review the following sections of the pilot manual:
 
@@ -31,62 +23,50 @@ To ensure the best chance of success, review the following sections of the pilot
 
 Once you have completed the test, our recruitment team will review your submission and contact you with the next steps.
 
-Good Luck 🤞!"""
-    },
-    "choose_callsign": {
-        "label": "Choose Callsign",
-        "emoji": "🪪",
-        "style": discord.ButtonStyle.success,
-        "template": """## ✅ Written Test Passed
+Good Luck \U0001f91e!"""
 
-Congratulations! 🎉 You've passed the written test.
+CALLSIGN_MSG = """## \u2705 Written Test Passed
 
-**✈️ Next Step**
+Congratulations! \U0001f389 You've passed the written test.
 
-Choose a callsign number between **101–999** and reply in your recruitment ticket.
+**\u2708\ufe0f Next Step**
+
+Choose a callsign number between **101\u2013999** and reply in your recruitment ticket.
 
 **Format Example:** QPVA123
 *(First come, first served)*
 
-Our team will confirm your callsign soon 👍"""
-    },
-    "join_crew_centre": {
-        "label": "Join Crew Centre",
-        "emoji": "🧑‍✈️",
-        "style": discord.ButtonStyle.success,
-        "template": """## 🧑‍✈️ Crew Centre Access
+Our team will confirm your callsign soon \U0001f44d"""
+
+CREW_CENTRE_MSG = """## \U0001f9d1\u200d\u2708\ufe0f Crew Centre Access
 
 Your callsign has been successfully reserved and your account is ready.
 Please join our Crew Centre using the link below to continue your onboarding and complete your profile setup.
 
-**🔗 Crew Centre:** https://crew-center-qpva.vercel.app
+**\U0001f517 Crew Centre:** https://crew-center-qpva.vercel.app
 
 Once logged in, you'll be guided through the remaining steps.
 
-**✈️ Next Step**
+**\u2708\ufe0f Next Step**
 
 You will now proceed to the **Practical Test**, where you'll demonstrate your flying skills and procedures.
 
-👉 Let me know when you're ready, and I'll provide more details about the practical test.
+\U0001f449 Let me know when you're ready, and I'll provide more details about the practical test.
 
-Good luck — you're almost ready to join **Akasa Air Virtual ✈️**"""
-    },
-    "practical_test": {
-        "label": "Practical Test",
-        "emoji": "🛫",
-        "style": discord.ButtonStyle.primary,
-        "template": """## 🛫 Practical Test Details
+Good luck \u2014 you're almost ready to join **Akasa Air Virtual \u2708\ufe0f**"""
+
+PRACTICAL_TEST_MSG = """## \U0001f6eb Practical Test Details
 
 Hey {mention},
 Here are the instructions for your **Practical Test** with **Akasa Air Virtual**. Please read carefully before starting.
 
-**✈️ Flight Information**
+**\u2708\ufe0f Flight Information**
 **- Aircraft:** Boeing 737-8 MAX (B38M)
 **- Server:** Expert Server
 **- Route:** VABB - VAAH
 **- Flight Type:** Full gate-to-gate flight
 
-**✅ Requirements**
+**\u2705 Requirements**
 - Use your assigned callsign (e.g., Akasa Air 123CR)
 - Generate & follow a **SimBrief flight plan**
 - Complete a full **gate-to-gate flight**
@@ -99,13 +79,9 @@ Here are the instructions for your **Practical Test** with **Akasa Air Virtual**
 After completing the test, send the replay file here.
 Our team will review your performance and provide your result.
 
-***Good luck — fly safe and show your best airmanship ✈️***"""
-    },
-    "pass": {
-        "label": "Pass ✅",
-        "emoji": "🎉",
-        "style": discord.ButtonStyle.success,
-        "template": """## 🎉 Practical Test Result — PASS
+***Good luck \u2014 fly safe and show your best airmanship \u2708\ufe0f***"""
+
+PASS_MSG = """## \U0001f389 Practical Test Result \u2014 PASS
 
 Hey {mention},
 
@@ -116,20 +92,16 @@ You are now **officially approved for active duty** and will be added to the pil
 
 - **Pick a Roles** <#1389839252883505246>
 
-Welcome to the team — fly safe and represent us proudly ✈️"""
-    },
-    "fail": {
-        "label": "Fail ❌",
-        "emoji": "📋",
-        "style": discord.ButtonStyle.danger,
-        "template": """## 📋 Practical Test Result — Not Passed
+Welcome to the team \u2014 fly safe and represent us proudly \u2708\ufe0f"""
+
+FAIL_MSG = """## \U0001f4cb Practical Test Result \u2014 Not Passed
 
 Hey {mention},
 
 Thank you for completing your Practical Flight Test with **Akasa Air Virtual.**
 
 After review, your performance did not meet the required standards at this time.
-Don't worry — you're welcome to **re-attempt** the test after additional practice.
+Don't worry \u2014 you're welcome to **re-attempt** the test after additional practice.
 
 **Examiner Feedback**
 *(write here the test feedback)*
@@ -139,9 +111,7 @@ Don't worry — you're welcome to **re-attempt** the test after additional pract
 - Contact recruitment when ready for a retest
 
 Let us know when you feel ready, and we'll be happy to schedule your next attempt.
-Keep practicing — we're here to support you"""
-    }
-}
+Keep practicing \u2014 we're here to support you"""
 
 
 def is_authorized(member: discord.Member) -> bool:
@@ -150,64 +120,61 @@ def is_authorized(member: discord.Member) -> bool:
 
 # ================= SEND MODAL =================
 
-class SendMessageModal(Modal):
-    def __init__(self, key: str, template: str):
-        super().__init__(title=f"Send — {MESSAGES[key]['label']}")
-        self.key = key
+class SendModal(Modal):
+    def __init__(self, label: str, template: str):
+        super().__init__(title=f"Send — {label}")
+        self.template = template
 
         self.mention = TextInput(
-            label="Tag the recruit (@username)",
-            placeholder="e.g. @foxtrot_lima1 or leave blank if not needed",
+            label="Tag the recruit (or leave blank)",
+            placeholder="e.g. @foxtrot_lima1",
             required=False,
             max_length=100
         )
         self.channel_id = TextInput(
-            label="Channel ID to send in",
-            placeholder="Right-click the ticket channel → Copy ID",
+            label="Ticket Channel ID",
+            placeholder="Right-click channel → Copy ID",
             max_length=20
         )
-        self.custom_message = TextInput(
-            label="Edit message (optional — keeps template if blank)",
+        self.extra_note = TextInput(
+            label="Extra note to append (optional)",
             style=discord.TextStyle.paragraph,
             required=False,
-            default=template,
-            max_length=2000
+            max_length=500,
+            placeholder="Leave blank to send the default template as-is"
         )
 
         self.add_item(self.mention)
         self.add_item(self.channel_id)
-        self.add_item(self.custom_message)
+        self.add_item(self.extra_note)
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            channel_id = int(self.channel_id.value.strip())
+            ch_id = int(self.channel_id.value.strip())
         except ValueError:
-            return await interaction.response.send_message(
-                "❌ Invalid channel ID.", ephemeral=True
-            )
+            return await interaction.response.send_message("❌ Invalid channel ID.", ephemeral=True)
 
-        channel = interaction.guild.get_channel(channel_id)
+        channel = interaction.guild.get_channel(ch_id)
         if not channel:
-            return await interaction.response.send_message(
-                "❌ Channel not found. Check the ID.", ephemeral=True
-            )
+            return await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
 
-        mention = self.mention.value.strip() if self.mention.value.strip() else ""
-        message_text = self.custom_message.value if self.custom_message.value.strip() else MESSAGES[self.key]["template"]
+        mention = self.mention.value.strip()
+        text = self.template.replace("{mention}", mention)
 
-        # Replace {mention} placeholder with actual mention
-        message_text = message_text.replace("{mention}", mention)
+        if self.extra_note.value.strip():
+            text += f"\n\n{self.extra_note.value.strip()}"
 
         try:
-            await channel.send(message_text)
+            await channel.send(text)
         except discord.Forbidden:
             return await interaction.response.send_message(
-                "❌ I don't have permission to send in that channel.", ephemeral=True
+                "❌ No permission to send in that channel.", ephemeral=True
             )
+        except Exception as e:
+            return await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
 
         await interaction.response.send_message(
-            f"✅ **{MESSAGES[self.key]['label']}** message sent in {channel.mention}",
-            ephemeral=True
+            f"✅ Message sent in {channel.mention}", ephemeral=True
         )
 
 
@@ -217,24 +184,49 @@ class RecruitmentPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-        for key, data in MESSAGES.items():
-            btn = Button(
-                label=data["label"],
-                emoji=data["emoji"],
-                style=data["style"],
-                custom_id=f"recruit_{key}"
+    async def _auth(self, interaction: discord.Interaction) -> bool:
+        if not is_authorized(interaction.user):
+            await interaction.response.send_message(
+                "❌ Only Staff and Executive Team can use this panel.", ephemeral=True
             )
-            btn.callback = self._make_callback(key, data["template"])
-            self.add_item(btn)
+            return False
+        return True
 
-    def _make_callback(self, key: str, template: str):
-        async def callback(interaction: discord.Interaction):
-            if not is_authorized(interaction.user):
-                return await interaction.response.send_message(
-                    "❌ Only Staff and Executive Team can use this panel.", ephemeral=True
-                )
-            await interaction.response.send_modal(SendMessageModal(key, template))
-        return callback
+    @discord.ui.button(label="Written Test", emoji="📝", style=discord.ButtonStyle.primary, custom_id="rp_written_test", row=0)
+    async def written_test(self, interaction: discord.Interaction, button: Button):
+        if not await self._auth(interaction):
+            return
+        await interaction.response.send_modal(SendModal("Written Test", WRITTEN_TEST_MSG))
+
+    @discord.ui.button(label="Choose Callsign", emoji="🪪", style=discord.ButtonStyle.success, custom_id="rp_callsign", row=0)
+    async def choose_callsign(self, interaction: discord.Interaction, button: Button):
+        if not await self._auth(interaction):
+            return
+        await interaction.response.send_modal(SendModal("Choose Callsign", CALLSIGN_MSG))
+
+    @discord.ui.button(label="Join Crew Centre", emoji="🧑‍✈️", style=discord.ButtonStyle.success, custom_id="rp_crew_centre", row=1)
+    async def join_crew_centre(self, interaction: discord.Interaction, button: Button):
+        if not await self._auth(interaction):
+            return
+        await interaction.response.send_modal(SendModal("Join Crew Centre", CREW_CENTRE_MSG))
+
+    @discord.ui.button(label="Practical Test", emoji="🛫", style=discord.ButtonStyle.primary, custom_id="rp_practical_test", row=1)
+    async def practical_test(self, interaction: discord.Interaction, button: Button):
+        if not await self._auth(interaction):
+            return
+        await interaction.response.send_modal(SendModal("Practical Test", PRACTICAL_TEST_MSG))
+
+    @discord.ui.button(label="Pass ✅", emoji="🎉", style=discord.ButtonStyle.success, custom_id="rp_pass", row=2)
+    async def result_pass(self, interaction: discord.Interaction, button: Button):
+        if not await self._auth(interaction):
+            return
+        await interaction.response.send_modal(SendModal("Pass", PASS_MSG))
+
+    @discord.ui.button(label="Fail ❌", emoji="📋", style=discord.ButtonStyle.danger, custom_id="rp_fail", row=2)
+    async def result_fail(self, interaction: discord.Interaction, button: Button):
+        if not await self._auth(interaction):
+            return
+        await interaction.response.send_modal(SendModal("Fail", FAIL_MSG))
 
 
 # ================= COG =================
@@ -243,10 +235,10 @@ class RecruitmentPanel(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="recruitment_panel", description="Send the Recruitment message panel (staff/exec only)")
+    @app_commands.command(name="recruitment_panel", description="Send the Recruitment panel (staff/exec only)")
     @app_commands.describe(
         channel="Channel to post the panel in",
-        banner="Optional banner image URL for the panel embed"
+        banner="Optional banner image URL"
     )
     async def recruitment_panel(
         self,
@@ -256,23 +248,20 @@ class RecruitmentPanel(commands.Cog):
     ):
         if not is_authorized(interaction.user):
             return await interaction.response.send_message(
-                "❌ Only Staff and Executive Team can send the recruitment panel.", ephemeral=True
+                "❌ Only Staff and Executive Team can send this panel.", ephemeral=True
             )
 
         embed = discord.Embed(
             title="🧑‍✈️ Akasa Air Virtual — Recruitment Panel",
             description=(
                 "Use the buttons below to send recruitment messages to applicants.\n\n"
-                "📝 **Written Test** — Send the written test instructions\n"
-                "🪪 **Choose Callsign** — Written test passed, choose a callsign\n"
-                "🧑‍✈️ **Join Crew Centre** — Callsign confirmed, join the Crew Centre\n"
-                "🛫 **Practical Test** — Send the practical test details\n"
-                "🎉 **Pass** — Practical test passed — welcome to the team!\n"
+                "📝 **Written Test** — Send written test instructions\n"
+                "🪪 **Choose Callsign** — Test passed, choose a callsign\n"
+                "🧑‍✈️ **Join Crew Centre** — Callsign confirmed, join Crew Centre\n"
+                "🛫 **Practical Test** — Send practical test details\n"
+                "🎉 **Pass** — Practical test passed\n"
                 "📋 **Fail** — Practical test not passed\n\n"
-                "Each button opens a form where you can:\n"
-                "• Tag the recruit\n"
-                "• Select the ticket channel\n"
-                "• Edit the message before sending"
+                "Each button lets you tag the recruit, pick the channel, and edit the message before sending."
             ),
             color=discord.Color.orange()
         )
@@ -280,10 +269,9 @@ class RecruitmentPanel(commands.Cog):
         if banner:
             embed.set_image(url=banner)
 
-        embed.set_footer(text="AkasaAirVirtual • Recruitment Panel — Staff & Exec Only")
+        embed.set_footer(text="AkasaAirVirtual • Recruitment Panel")
 
-        view = RecruitmentPanelView()
-        await channel.send(embed=embed, view=view)
+        await channel.send(embed=embed, view=RecruitmentPanelView())
         await interaction.response.send_message(
             f"✅ Recruitment panel sent in {channel.mention}", ephemeral=True
         )
