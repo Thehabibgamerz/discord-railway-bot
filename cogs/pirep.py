@@ -31,7 +31,7 @@ def db_get_user_pireps(discord_id: int):
         return []
 
 
-def db_get_all_pireps(limit: int = 20):
+def db_get_all_pireps(limit: int = 20)
     try:
         res = get_db().table("pireps").select("*").order("filed_at", desc=True).limit(limit).execute()
         return res.data or []
