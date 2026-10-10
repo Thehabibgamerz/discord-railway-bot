@@ -1,170 +1,351 @@
+
+import os
+import re
+import asyncio
+import aiohttp
 import discord
+
 from discord.ext import commands
 from discord import app_commands
-import aiohttp
-import os
+from datetime import datetime, timezone
+
 
 IF_API_KEY = os.getenv("IF_API_KEY")
 BASE_URL = "https://api.infiniteflight.com/public/v2"
 
-SERVER_MAP = {
-    "Casual": "casual",
-    "Training": "training",
-    "Expert": "expert"
-}
-
-SERVER_COLORS = {
-    "Casual": discord.Color.green(),
-    "Training": discord.Color.blue(),
-    "Expert": discord.Color.orange()
-}
+EXPERT_COLOR = discord.Color.orange()
+REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
 
 
-class ATISServerSelect(discord.ui.Select):
-    def __init__(self, airport: str):
-        self.airport = airport
+async def fetch_atis(airport: str):
+    """Fetch live ATIS and weather from the Infinite Flight Expert Server."""
 
-        options = [
-            discord.SelectOption(label="Casual", description="Casual Server", emoji="🟢"),
-            discord.SelectOption(label="Training", description="Training Server", emoji="🔵"),
-            discord.SelectOption(label="Expert", description="Expert Server", emoji="🟠")
-        ]
+    if not IF_API_KEY:
+        return None, "❌ The IF_API_KEY environment variable is missing."
 
-        super().__init__(placeholder="✈️ Select a server...", min_values=1, max_values=1, options=options)
+    try:
+        async with aiohttp.ClientSession(
+            timeout=REQUEST_TIMEOUT
+        ) as session:
 
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
+            # 1. Find the Expert Server session
+            async with session.get(
+                f"{BASE_URL}/sessions",
+                params={"apikey": IF_API_KEY}
+            ) as response:
 
-        server_choice = self.values[0]
-        server_key = SERVER_MAP[server_choice]
-        airport = self.airport
+                if response.status == 401:
+                    return None, "❌ Invalid Infinite Flight API key."
 
-        # Step 1: Find session
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.get(f"{BASE_URL}/sessions?apikey={IF_API_KEY}") as resp:
-                    if resp.status == 401:
-                        return await interaction.followup.send("❌ Invalid API key.", ephemeral=True)
-                    elif resp.status != 200:
-                        return await interaction.followup.send(
-                            f"⚠️ Failed to fetch sessions (HTTP {resp.status})", ephemeral=True
-                        )
-                    sessions_data = await resp.json()
-            except Exception as e:
-                return await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+                if response.status != 200:
+                    return None, (
+                        f"⚠️ Failed to fetch sessions "
+                        f"(HTTP {response.status})."
+                    )
 
-        sessions = sessions_data.get("result", [])
-        session_id = None
-        for s in sessions:
-            if server_key.lower() in s.get("name", "").lower():
-                session_id = s.get("id")
-                break
-
-        if not session_id:
-            return await interaction.followup.send(
-                f"⚠️ No active {server_choice} session found.", ephemeral=True
-            )
-
-        async with aiohttp.ClientSession() as session:
-
-            # Step 2: Fetch ATIS
-            try:
-                async with session.get(
-                    f"{BASE_URL}/sessions/{session_id}/airport/{airport}/atis?apikey={IF_API_KEY}"
-                ) as resp:
-                    if resp.status == 401:
-                        return await interaction.followup.send("❌ Invalid API key.", ephemeral=True)
-                    elif resp.status != 200:
-                        return await interaction.followup.send(
-                            f"⚠️ Failed to fetch ATIS (HTTP {resp.status})", ephemeral=True
-                        )
-                    atis_data = await resp.json()
-            except Exception as e:
-                return await interaction.followup.send(f"❌ Error fetching ATIS: {e}", ephemeral=True)
-
-            error_code = atis_data.get("errorCode")
-            result_text = atis_data.get("result")
-
-            if error_code != 0 or not result_text:
-                return await interaction.followup.send(
-                    f"❌ No active ATIS available for **{airport}** on the {server_choice} server.",
-                    ephemeral=False
+                sessions_data = await response.json(
+                    content_type=None
                 )
 
-            # Step 3: Fetch METAR
+            if sessions_data.get("errorCode", 0) != 0:
+                return None, "❌ Infinite Flight API returned an error."
+
+            sessions = sessions_data.get("result", [])
+
+            # Match Expert Server, not Casual or Training.
+            expert_session = next(
+                (
+                    server for server in sessions
+                    if "expert" in server.get("name", "").lower()
+                ),
+                None
+            )
+
+            if not expert_session:
+                return None, (
+                    "⚠️ No active Infinite Flight Expert Server "
+                    "session was found."
+                )
+
+            session_id = expert_session.get("id")
+
+            if not session_id:
+                return None, "❌ The Expert Server session ID is missing."
+
+            # 2. Fetch ATIS
+            async with session.get(
+                f"{BASE_URL}/sessions/{session_id}/airport/"
+                f"{airport}/atis",
+                params={"apikey": IF_API_KEY}
+            ) as response:
+
+                if response.status == 401:
+                    return None, "❌ Invalid Infinite Flight API key."
+
+                if response.status != 200:
+                    return None, (
+                        f"⚠️ Failed to fetch ATIS "
+                        f"(HTTP {response.status})."
+                    )
+
+                atis_data = await response.json(
+                    content_type=None
+                )
+
+            if atis_data.get("errorCode") != 0:
+                return None, (
+                    f"❌ No ATIS is currently available for "
+                    f"**{airport}** on the Expert Server."
+                )
+
+            atis_text = atis_data.get("result")
+
+            if isinstance(atis_text, dict):
+                atis_text = (
+                    atis_text.get("atis")
+                    or atis_text.get("text")
+                    or str(atis_text)
+                )
+
+            if not isinstance(atis_text, str) or not atis_text.strip():
+                return None, (
+                    f"❌ No ATIS information is currently available "
+                    f"for **{airport}** on the Expert Server."
+                )
+
+            # 3. Fetch weather / METAR
             metar_text = None
+
             try:
                 async with session.get(
-                    f"{BASE_URL}/sessions/{session_id}/weather/{airport}?apikey={IF_API_KEY}"
-                ) as resp:
-                    if resp.status == 200:
-                        weather_data = await resp.json()
-                        w = weather_data.get("result", {})
-                        # Try all known field names the IF API may use
-                        metar_text = (
-                            w.get("metar")
-                            or w.get("raw")
-                            or w.get("rawMetar")
-                            or w.get("rawMETAR")
-                            or w.get("observation")
+                    f"{BASE_URL}/sessions/{session_id}/weather/"
+                    f"{airport}",
+                    params={"apikey": IF_API_KEY}
+                ) as response:
+
+                    if response.status == 200:
+                        weather_data = await response.json(
+                            content_type=None
                         )
-            except Exception:
+                        weather = weather_data.get("result", {})
+
+                        if isinstance(weather, dict):
+                            metar_text = (
+                                weather.get("metar")
+                                or weather.get("raw")
+                                or weather.get("rawMetar")
+                                or weather.get("rawMETAR")
+                                or weather.get("observation")
+                            )
+
+                        elif isinstance(weather, str):
+                            metar_text = weather
+
+            except (aiohttp.ClientError, asyncio.TimeoutError):
+                # ATIS can still be displayed if weather is unavailable.
                 pass
 
-        # Step 4: Build embed
-        embed = discord.Embed(
-            title=f"📡 ATIS — {airport}",
-            color=SERVER_COLORS.get(server_choice, discord.Color.orange())
+            return {
+                "airport": airport,
+                "atis": atis_text,
+                "metar": metar_text,
+                "server": expert_session.get(
+                    "name", "Expert Server"
+                ),
+                "updated": discord.utils.utcnow()
+            }, None
+
+    except asyncio.TimeoutError:
+        return None, (
+            "⏱️ Infinite Flight API timed out. Please try again."
         )
 
-        embed.add_field(name="🖥️ Server", value=server_choice, inline=True)
-        embed.add_field(name="🛫 Airport", value=airport, inline=True)
-        embed.add_field(name="\u200b", value="\u200b", inline=True)
-
-        embed.add_field(
-            name="📢 ATIS Information",
-            value=f"```{result_text}```",
-            inline=False
+    except aiohttp.ClientError:
+        return None, (
+            "🌐 Could not connect to the Infinite Flight API. "
+            "Please try again later."
         )
 
-        embed.add_field(
-            name="🌦️ METAR",
-            value=f"```{metar_text}```" if metar_text else "```Unavailable```",
-            inline=False
+    except (ValueError, TypeError, AttributeError):
+        return None, (
+            "⚠️ Received an unexpected response from the "
+            "Infinite Flight API."
         )
 
-        embed.set_footer(
-            text=f"AkasaAirVirtual • Infinite Flight Live • {server_choice} Server"
+
+def make_atis_embed(data: dict) -> discord.Embed:
+    """Build the ATIS embed."""
+
+    airport = data["airport"]
+    atis_text = data["atis"]
+    metar_text = data["metar"]
+
+    embed = discord.Embed(
+        title=f"📡 Airport ATIS — {airport}",
+        description=(
+            "Live airport information from the "
+            "**Infinite Flight Expert Server**."
+        ),
+        color=EXPERT_COLOR,
+        timestamp=data["updated"]
+    )
+
+    embed.add_field(
+        name="🛫 Airport ICAO",
+        value=f"`{airport}`",
+        inline=True
+    )
+
+    embed.add_field(
+        name="🖥️ Server",
+        value="🟠 Expert",
+        inline=True
+    )
+
+    embed.add_field(
+        name="🕒 Updated",
+        value=discord.utils.format_dt(
+            data["updated"], style="R"
+        ),
+        inline=True
+    )
+
+    # Keep embed fields within Discord's character limits.
+    atis_text = atis_text.strip()
+    if len(atis_text) > 4000:
+        atis_text = atis_text[:3997] + "..."
+
+    embed.add_field(
+        name="📢 ATIS Information",
+        value=f"```text\n{atis_text}\n```",
+        inline=False
+    )
+
+    if metar_text:
+        metar_text = str(metar_text).strip()
+        if len(metar_text) > 1000:
+            metar_text = metar_text[:997] + "..."
+
+        metar_value = f"```text\n{metar_text}\n```"
+    else:
+        metar_value = (
+            "Weather information is currently unavailable."
         )
 
-        # Send public message directly to the channel so everyone can see it
-        await interaction.channel.send(embed=embed)
+    embed.add_field(
+        name="🌦️ METAR / Weather",
+        value=metar_value,
+        inline=False
+    )
 
-        # Acknowledge the ephemeral interaction silently
-        await interaction.followup.send("✅ ATIS posted!", ephemeral=True)
+    embed.set_footer(
+        text="Akasa Air Virtual • Infinite Flight Live"
+    )
+
+    return embed
 
 
-class ATISServerSelectView(discord.ui.View):
+class ATISRefreshView(discord.ui.View):
     def __init__(self, airport: str):
-        super().__init__(timeout=120)
-        self.add_item(ATISServerSelect(airport))
+        super().__init__(timeout=900)
+        self.airport = airport
 
+    @discord.ui.button(
+        label="Refresh ATIS",
+        emoji="🔄",
+        style=discord.ButtonStyle.primary
+    )
+    async def refresh(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await interaction.response.defer()
 
-class ATIS(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
+        data, error = await fetch_atis(self.airport)
 
-    @app_commands.command(name="atis", description="Get live ATIS info for an airport on Infinite Flight")
-    @app_commands.describe(airport="Airport ICAO code (e.g. EGLL, OMDB, VIDP)")
-    async def atis(self, interaction: discord.Interaction, airport: str):
-        airport = airport.upper().strip()
+        if error:
+            return await interaction.followup.send(
+                error,
+                ephemeral=True
+            )
 
-        await interaction.response.send_message(
-            f"✈️ Select the server to fetch ATIS for **{airport}**:",
-            view=ATISServerSelectView(airport),
+        embed = make_atis_embed(data)
+
+        # Update the existing public ATIS message.
+        await interaction.message.edit(
+            embed=embed,
+            view=self
+        )
+
+        await interaction.followup.send(
+            f"✅ ATIS for **{self.airport}** refreshed.",
             ephemeral=True
         )
 
 
-async def setup(bot):
+class ATIS(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    @app_commands.command(
+        name="atis",
+        description="Get live airport ATIS from the Infinite Flight Expert Server"
+    )
+    @app_commands.describe(
+        airport="Four-letter ICAO airport code, e.g. VIDP, VABB or EGLL"
+    )
+    @app_commands.guild_only()
+    async def atis(
+        self,
+        interaction: discord.Interaction,
+        airport: str
+    ):
+        airport = airport.strip().upper()
+
+        # Basic ICAO format validation.
+        if not re.fullmatch(r"[A-Z]{4}", airport):
+            return await interaction.response.send_message(
+                "❌ Enter a valid four-letter ICAO code, "
+                "for example `VIDP`, `VABB`, or `EGLL`.",
+                ephemeral=True
+            )
+
+        await interaction.response.defer(
+            ephemeral=True,
+            thinking=True
+        )
+
+        data, error = await fetch_atis(airport)
+
+        if error:
+            return await interaction.followup.send(
+                error,
+                ephemeral=True
+            )
+
+        embed = make_atis_embed(data)
+        view = ATISRefreshView(airport)
+
+        # Publish the ATIS in the channel.
+        try:
+            await interaction.channel.send(
+                embed=embed,
+                view=view
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            return await interaction.followup.send(
+                "❌ I couldn't post the ATIS. Please check my "
+                "channel permissions and try again.",
+                ephemeral=True
+            )
+
+        await interaction.followup.send(
+            f"✅ ATIS for **{airport}** posted from the "
+            "**Expert Server**.",
+            ephemeral=True
+        )
+
+
+async def setup(bot: commands.Bot):
     await bot.add_cog(ATIS(bot))
