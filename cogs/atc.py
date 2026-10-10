@@ -9,6 +9,10 @@ from discord.ext import commands
 from discord import app_commands
 
 
+# =========================================================
+# CONFIGURATION
+# =========================================================
+
 IF_API_KEY = os.getenv("IF_API_KEY")
 BASE_URL = "https://api.infiniteflight.com/public/v2"
 
@@ -27,9 +31,9 @@ FACILITY_TYPES = {
 }
 
 
-# --------------------------------------------------
+# =========================================================
 # INFINITE FLIGHT API
-# --------------------------------------------------
+# =========================================================
 
 async def api_get(session, endpoint):
     if not IF_API_KEY:
@@ -69,7 +73,7 @@ async def api_get(session, endpoint):
 
 
 async def get_atc_data():
-    """Fetch the Expert Server session and live controllers."""
+    """Return the current Expert session and its live ATC controllers."""
 
     if not IF_API_KEY:
         raise RuntimeError(
@@ -82,6 +86,9 @@ async def get_atc_data():
 
         sessions = await api_get(session, "sessions")
 
+        if not isinstance(sessions, list):
+            raise RuntimeError("Unexpected sessions response from the API.")
+
         expert_sessions = [
             item for item in sessions
             if isinstance(item, dict)
@@ -93,7 +100,9 @@ async def get_atc_data():
             raise RuntimeError("No active Expert Server session was found.")
 
         expert_sessions.sort(
-            key=lambda item: item.get("name", "").strip().lower() != "expert"
+            key=lambda item: (
+                item.get("name", "").strip().lower() != "expert"
+            )
         )
 
         expert = expert_sessions[0]
@@ -109,9 +118,9 @@ async def get_atc_data():
     return expert, controllers
 
 
-# --------------------------------------------------
+# =========================================================
 # HELPER FUNCTIONS
-# --------------------------------------------------
+# =========================================================
 
 def get_airport_name(controller):
     airport = controller.get("airportName")
@@ -170,7 +179,7 @@ def get_active_time(controller):
 
             start_dt = start_dt.astimezone(timezone.utc)
 
-        elapsed = max(
+        seconds = max(
             0,
             int(
                 (
@@ -179,7 +188,7 @@ def get_active_time(controller):
             ),
         )
 
-        hours, remainder = divmod(elapsed, 3600)
+        hours, remainder = divmod(seconds, 3600)
         minutes = remainder // 60
 
         if hours:
@@ -192,8 +201,6 @@ def get_active_time(controller):
 
 
 def get_map_url(controllers):
-    """Return a Google Maps URL if valid coordinates are available."""
-
     for controller in controllers:
         latitude = controller.get("latitude")
         longitude = controller.get("longitude")
@@ -210,10 +217,17 @@ def get_map_url(controllers):
         if not (-180 <= longitude <= 180):
             continue
 
-        return f"https://www.google.com/maps?q={latitude},{longitude}"
+        return (
+            "https://www.google.com/maps?q="
+            f"{latitude},{longitude}"
+        )
 
     return None
 
+
+# =========================================================
+# EMBED BUILDER
+# =========================================================
 
 def build_airport_embed(airport, controllers, session_name):
     embed = discord.Embed(
@@ -251,13 +265,18 @@ def build_airport_embed(airport, controllers, session_name):
             f"{facility:<14}  {username:<24}  {active:>7}"
         )
 
-    # Stay within Discord's embed field size limit.
-    displayed_lines = [lines[0], lines[1]]
+    # Respect Discord's 1024-character embed field limit.
+    displayed_lines = lines[:2]
 
     for line in lines[2:]:
-        candidate = displayed_lines + [line, "... more controllers omitted"]
+        candidate = displayed_lines + [
+            line,
+            "... more controllers omitted",
+        ]
 
-        if len("```text\n" + "\n".join(candidate) + "\n```") > 1000:
+        if len(
+            "```text\n" + "\n".join(candidate) + "\n```"
+        ) > 1000:
             displayed_lines.append("... more controllers omitted")
             break
 
@@ -265,7 +284,11 @@ def build_airport_embed(airport, controllers, session_name):
 
     embed.add_field(
         name="📋 Active Controllers",
-        value="```text\n" + "\n".join(displayed_lines) + "\n```",
+        value=(
+            "```text\n"
+            + "\n".join(displayed_lines)
+            + "\n```"
+        ),
         inline=False,
     )
 
@@ -285,79 +308,50 @@ def build_airport_embed(airport, controllers, session_name):
     return embed
 
 
-# --------------------------------------------------
-# SAFE INTERACTION HELPERS
-# --------------------------------------------------
+# =========================================================
+# ERROR HANDLING
+# =========================================================
 
-async def acknowledge(interaction: discord.Interaction):
-    """
-    Acknowledge a component interaction without creating a separate
-    'thinking' response. This allows the original message to be edited.
-    """
-
-    if not interaction.response.is_done():
-        await interaction.response.defer()
-
-
-async def report_error(interaction, message):
-    """Send an error without leaving the interaction unacknowledged."""
-
-    try:
-        if interaction.response.is_done():
-            await interaction.followup.send(
-                message,
-                ephemeral=True,
-            )
-        else:
-            await interaction.response.send_message(
-                message,
-                ephemeral=True,
-            )
-    except discord.HTTPException:
-        pass
-
-
-async def safe_fetch_atc(interaction):
-    """Fetch live data and handle common API failures."""
-
+async def fetch_safely(interaction):
     try:
         return await get_atc_data()
 
     except RuntimeError as exc:
-        await report_error(interaction, f"⚠️ {exc}")
+        await interaction.followup.send(
+            f"⚠️ {exc}",
+            ephemeral=True,
+        )
 
     except asyncio.TimeoutError:
-        await report_error(
-            interaction,
+        await interaction.followup.send(
             "⏱️ Infinite Flight API timed out. Please try again.",
+            ephemeral=True,
         )
 
     except aiohttp.ClientError:
-        await report_error(
-            interaction,
+        await interaction.followup.send(
             "🌐 Could not connect to the Infinite Flight API.",
+            ephemeral=True,
         )
 
     except (ValueError, TypeError, KeyError):
-        await report_error(
-            interaction,
+        await interaction.followup.send(
             "⚠️ Received an unexpected response from Infinite Flight.",
+            ephemeral=True,
         )
 
     return None
 
 
-# --------------------------------------------------
+# =========================================================
 # AIRPORT SELECT MENU
-# --------------------------------------------------
+# =========================================================
 
 class ATCAirportSelect(discord.ui.Select):
 
-    def __init__(self, parent_view, options):
-        self.parent_view = parent_view
-
+    def __init__(self, options):
         super().__init__(
-            placeholder="✈️ Select an ATC airport...",
+            placeholder="🌍 Select an airport to view ATC...",
             min_values=1,
             max_values=1,
             options=options,
@@ -365,17 +359,17 @@ class ATCAirportSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        # IMPORTANT: defer without thinking=True.
-        await acknowledge(interaction)
+        # Acknowledge the selection without creating a thinking response.
+        await interaction.response.defer()
 
-        airport = self.values[0]
-
-        result = await safe_fetch_atc(interaction)
+        result = await fetch_safely(interaction)
 
         if result is None:
             return
 
         expert, controllers = result
+        airport = self.values[0]
+
         airport_controllers = [
             controller for controller in controllers
             if get_airport_name(controller) == airport
@@ -384,60 +378,46 @@ class ATCAirportSelect(discord.ui.Select):
         airports = count_airports(controllers)
         session_name = expert.get("name", "Expert")
 
-        if not airport_controllers:
-            new_view = ATCView(
-                expert["id"],
+        if airport_controllers:
+            embed = build_airport_embed(
+                airport,
+                airport_controllers,
                 session_name,
+            )
+
+            new_view = ATCView(
                 airports,
+                selected_airport=airport,
             )
-
-            await interaction.message.edit(
-                content=(
-                    f"⚠️ No active controllers remain at **{airport}**."
+        else:
+            embed = discord.Embed(
+                title=f"🎙️ Live ATC — {airport}",
+                description=(
+                    f"No active controllers are currently listed at "
+                    f"**{airport}** on the Expert Server."
                 ),
-                embed=None,
-                view=new_view if airports else None,
+                color=EXPERT_COLOR,
             )
-            return
 
-        embed = build_airport_embed(
-            airport,
-            airport_controllers,
-            session_name,
-        )
+            new_view = ATCView(airports)
 
-        new_view = ATCView(
-            expert["id"],
-            session_name,
-            airports,
-            selected_airport=airport,
-        )
-
-        # Update the original message. Do not create another response.
-        await interaction.message.edit(
+        # Edit the original component message, not a new response.
+        await interaction.edit_original_response(
             content=None,
             embed=embed,
-            view=new_view,
+            view=new_view if airports else None,
         )
 
 
-# --------------------------------------------------
-# ATC VIEW: DROPDOWN + REFRESH
-# --------------------------------------------------
+# =========================================================
+# ATC VIEW
+# =========================================================
 
 class ATCView(discord.ui.View):
 
-    def __init__(
-        self,
-        session_id,
-        session_name,
-        airports,
-        selected_airport=None,
-    ):
+    def __init__(self, airports, selected_airport=None):
         super().__init__(timeout=300)
 
-        self.session_id = session_id
-        self.session_name = session_name
         self.airports = airports
         self.selected_airport = selected_airport
 
@@ -451,9 +431,7 @@ class ATCView(discord.ui.View):
                 for airport, count in airports[:25]
             ]
 
-            self.add_item(ATCAirportSelect(self, options))
-
-        self.refresh_button.disabled = False
+            self.add_item(ATCAirportSelect(options))
 
     @discord.ui.button(
         label="Refresh ATC",
@@ -466,10 +444,9 @@ class ATCView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
-        # Acknowledge immediately, but do not create a thinking message.
-        await acknowledge(interaction)
+        await interaction.response.defer()
 
-        result = await safe_fetch_atc(interaction)
+        result = await fetch_safely(interaction)
 
         if result is None:
             return
@@ -478,13 +455,9 @@ class ATCView(discord.ui.View):
         airports = count_airports(controllers)
         session_name = expert.get("name", "Expert")
 
-        # Refreshing the initial airport menu.
+        # Refresh the initial airport menu.
         if not self.selected_airport:
-            new_view = ATCView(
-                expert["id"],
-                session_name,
-                airports,
-            )
+            new_view = ATCView(airports)
 
             if airports:
                 note = (
@@ -493,13 +466,13 @@ class ATCView(discord.ui.View):
                     else "Select an airport to view its active controllers."
                 )
 
-                await interaction.message.edit(
+                await interaction.edit_original_response(
                     content=f"🟠 **Expert Server ATC**\n{note}",
                     embed=None,
                     view=new_view,
                 )
             else:
-                await interaction.message.edit(
+                await interaction.edit_original_response(
                     content=(
                         "🟠 No active ATC controllers were found "
                         "on the Expert Server."
@@ -510,52 +483,46 @@ class ATCView(discord.ui.View):
 
             return
 
-        # Refreshing a selected airport.
+        # Refresh the currently selected airport.
+        airport = self.selected_airport
+
         airport_controllers = [
             controller for controller in controllers
-            if get_airport_name(controller) == self.selected_airport
+            if get_airport_name(controller) == airport
         ]
 
         if not airport_controllers:
-            new_view = ATCView(
-                expert["id"],
-                session_name,
-                airports,
-            )
+            new_view = ATCView(airports)
 
-            await interaction.message.edit(
-                content=(
-                    f"⚠️ No active controllers remain at "
-                    f"**{self.selected_airport}**."
-                ),
+            await interaction.edit_original_response(
+                content=f"⚠️ No active controllers remain at **{airport}**.",
                 embed=None,
                 view=new_view if airports else None,
             )
+
             return
 
         embed = build_airport_embed(
-            self.selected_airport,
+            airport,
             airport_controllers,
             session_name,
         )
 
         new_view = ATCView(
-            expert["id"],
-            session_name,
             airports,
-            selected_airport=self.selected_airport,
+            selected_airport=airport,
         )
 
-        await interaction.message.edit(
+        await interaction.edit_original_response(
             content=None,
             embed=embed,
             view=new_view,
         )
 
 
-# --------------------------------------------------
+# =========================================================
 # MAIN /ATC COMMAND
-# --------------------------------------------------
+# =========================================================
 
 class ATC(commands.Cog):
 
@@ -564,18 +531,17 @@ class ATC(commands.Cog):
 
     @app_commands.command(
         name="atc",
-        description=(
-            "View live airport ATC on the Infinite Flight Expert Server"
-        ),
+        description="View live airport ATC on the Infinite Flight Expert Server",
     )
     @app_commands.guild_only()
     async def atc(self, interaction: discord.Interaction):
+        # Defer the slash command without showing a thinking indicator.
         await interaction.response.defer(
             ephemeral=True,
             thinking=False,
         )
 
-        result = await safe_fetch_atc(interaction)
+        result = await fetch_safely(interaction)
 
         if result is None:
             return
@@ -589,11 +555,7 @@ class ATC(commands.Cog):
                 ephemeral=True,
             )
 
-        view = ATCView(
-            expert["id"],
-            expert.get("name", "Expert"),
-            airports,
-        )
+        view = ATCView(airports)
 
         note = (
             f"Showing the first 25 of {len(airports)} airports."
