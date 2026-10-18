@@ -73,7 +73,7 @@ async def api_get(session, endpoint):
 
 
 async def get_atc_data():
-    """Return the current Expert session and its live ATC controllers."""
+    """Fetch the current Expert Server session and ATC controllers."""
 
     if not IF_API_KEY:
         raise RuntimeError(
@@ -217,10 +217,7 @@ def get_map_url(controllers):
         if not (-180 <= longitude <= 180):
             continue
 
-        return (
-            "https://www.google.com/maps?q="
-            f"{latitude},{longitude}"
-        )
+        return f"https://www.google.com/maps?q={latitude},{longitude}"
 
     return None
 
@@ -265,7 +262,6 @@ def build_airport_embed(airport, controllers, session_name):
             f"{facility:<14}  {username:<24}  {active:>7}"
         )
 
-    # Respect Discord's 1024-character embed field limit.
     displayed_lines = lines[:2]
 
     for line in lines[2:]:
@@ -317,34 +313,28 @@ async def fetch_safely(interaction):
         return await get_atc_data()
 
     except RuntimeError as exc:
-        await interaction.followup.send(
-            f"⚠️ {exc}",
-            ephemeral=True,
-        )
+        await interaction.followup.send(f"⚠️ {exc}")
 
     except asyncio.TimeoutError:
         await interaction.followup.send(
-            "⏱️ Infinite Flight API timed out. Please try again.",
-            ephemeral=True,
+            "⏱️ Infinite Flight API timed out. Please try again."
         )
 
     except aiohttp.ClientError:
         await interaction.followup.send(
-            "🌐 Could not connect to the Infinite Flight API.",
-            ephemeral=True,
+            "🌐 Could not connect to the Infinite Flight API."
         )
 
     except (ValueError, TypeError, KeyError):
         await interaction.followup.send(
-            "⚠️ Received an unexpected response from Infinite Flight.",
-            ephemeral=True,
+            "⚠️ Received an unexpected response from Infinite Flight."
         )
 
     return None
 
 
 # =========================================================
-# AIRPORT SELECT MENU
+# AIRPORT DROPDOWN
 # =========================================================
 
 class ATCAirportSelect(discord.ui.Select):
@@ -359,7 +349,7 @@ class ATCAirportSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        # Acknowledge the selection without creating a thinking response.
+        # Acknowledge the component interaction immediately.
         await interaction.response.defer()
 
         result = await fetch_safely(interaction)
@@ -401,7 +391,7 @@ class ATCAirportSelect(discord.ui.Select):
 
             new_view = ATCView(airports)
 
-        # Edit the original component message, not a new response.
+        # Edit the original public message.
         await interaction.edit_original_response(
             content=None,
             embed=embed,
@@ -410,7 +400,7 @@ class ATCAirportSelect(discord.ui.Select):
 
 
 # =========================================================
-# ATC VIEW
+# PUBLIC ATC VIEW
 # =========================================================
 
 class ATCView(discord.ui.View):
@@ -455,7 +445,7 @@ class ATCView(discord.ui.View):
         airports = count_airports(controllers)
         session_name = expert.get("name", "Expert")
 
-        # Refresh the initial airport menu.
+        # Refresh the public airport-selection menu.
         if not self.selected_airport:
             new_view = ATCView(airports)
 
@@ -483,7 +473,7 @@ class ATCView(discord.ui.View):
 
             return
 
-        # Refresh the currently selected airport.
+        # Refresh the selected airport's controllers.
         airport = self.selected_airport
 
         airport_controllers = [
@@ -521,7 +511,7 @@ class ATCView(discord.ui.View):
 
 
 # =========================================================
-# MAIN /ATC COMMAND
+# /ACTIVEATC COMMAND
 # =========================================================
 
 class ATC(commands.Cog):
@@ -530,16 +520,13 @@ class ATC(commands.Cog):
         self.bot = bot
 
     @app_commands.command(
-        name="atc",
+        name="activeatc",
         description="View live airport ATC on the Infinite Flight Expert Server",
     )
     @app_commands.guild_only()
-    async def atc(self, interaction: discord.Interaction):
-        # Defer the slash command without showing a thinking indicator.
-        await interaction.response.defer(
-            ephemeral=True,
-            thinking=False,
-        )
+    async def activeatc(self, interaction: discord.Interaction):
+        # Public response: everyone can see the menu and results.
+        await interaction.response.defer(thinking=False)
 
         result = await fetch_safely(interaction)
 
@@ -551,8 +538,7 @@ class ATC(commands.Cog):
 
         if not airports:
             return await interaction.followup.send(
-                "🟠 No active ATC controllers were found on the Expert Server.",
-                ephemeral=True,
+                "🟠 No active ATC controllers were found on the Expert Server."
             )
 
         view = ATCView(airports)
@@ -566,7 +552,6 @@ class ATC(commands.Cog):
         await interaction.followup.send(
             content=f"🟠 **Expert Server ATC**\n{note}",
             view=view,
-            ephemeral=True,
         )
 
 
