@@ -3,6 +3,7 @@
 # AKASA AIR VIRTUAL — INFINITE FLIGHT WORLD MONITOR
 # FILE: cogs/worldstatus.py
 # Python 3.10.12 | discord.py 2.x | aiohttp
+# PUBLIC DISCORD PANEL
 # ============================================================
 
 import os
@@ -13,7 +14,6 @@ import aiohttp
 import discord
 from discord.ext import commands
 from discord import app_commands
-
 
 log = logging.getLogger(__name__)
 
@@ -53,15 +53,15 @@ def safe_int(value):
         return 0
 
 
+def airport_icao(airport):
+    return str(airport.get("airportIcao") or "N/A").upper()
+
+
 def traffic_total(airport):
     return (
         safe_int(airport.get("inboundFlightsCount"))
         + safe_int(airport.get("outboundFlightsCount"))
     )
-
-
-def airport_icao(airport):
-    return str(airport.get("airportIcao") or "N/A").upper()
 
 
 def get_active_duration(start_raw):
@@ -85,7 +85,7 @@ def get_active_duration(start_raw):
                 (
                     datetime.now(timezone.utc)
                     - started.astimezone(timezone.utc)
-                ).total_seconds()
+                ).total_seconds(),
             ),
         )
 
@@ -101,6 +101,21 @@ def get_active_duration(start_raw):
         return "N/A"
 
 
+def sort_airports(world_data, sort_mode):
+    if sort_mode == "Inbound":
+        key = lambda a: safe_int(a.get("inboundFlightsCount"))
+    elif sort_mode == "Outbound":
+        key = lambda a: safe_int(a.get("outboundFlightsCount"))
+    elif sort_mode == "ATC":
+        key = lambda a: len(a.get("atcFacilities") or [])
+    elif sort_mode == "ICAO":
+        return sorted(world_data, key=airport_icao)
+    else:
+        key = traffic_total
+
+    return sorted(world_data, key=key, reverse=True)
+
+
 def build_airport_embed(airport, server_choice):
     icao = airport_icao(airport)
     name = airport.get("airportName") or icao
@@ -114,7 +129,8 @@ def build_airport_embed(airport, server_choice):
         description=(
             f"**Airport:** `{icao}`\n"
             f"**Server:** {server_choice}\n"
-            f"**Traffic status:** {'Active' if inbound + outbound else 'Quiet'}"
+            f"**Traffic status:** "
+            f"{'Active' if inbound + outbound else 'Quiet'}"
         ),
         color=ORANGE,
         timestamp=datetime.now(timezone.utc),
@@ -146,20 +162,23 @@ def build_airport_embed(airport, server_choice):
 
         for facility in facilities:
             facility_type = FACILITY_TYPES.get(
-                safe_int(facility.get("type")), "Unknown"
+                safe_int(facility.get("type")),
+                "Unknown",
             )
-            username = facility.get("username") or "Unlinked controller"
-            duration = get_active_duration(facility.get("startTime"))
+            username = str(
+                facility.get("username") or "Unlinked controller"
+            ).replace("`", "'")[:60]
 
-            # Avoid breaking the embed with unusually long usernames.
-            username = str(username).replace("`", "'")[:60]
+            duration = get_active_duration(
+                facility.get("startTime")
+            )
 
             rows.append(
                 f"**{facility_type}** — {username}\n"
                 f"└ Online: `{duration}`"
             )
 
-        atc_text = "\n".join(rows)
+        atc_text = "\n\n".join(rows)
 
         if len(atc_text) > 1024:
             atc_text = atc_text[:1000] + "\n…"
@@ -197,7 +216,10 @@ def build_summary_embed(world_data, server_choice, page, sort_mode):
         len(a.get("atcFacilities") or []) for a in world_data
     )
 
-    total_pages = max(1, (len(airports) + PAGE_SIZE - 1) // PAGE_SIZE)
+    total_pages = max(
+        1,
+        (len(airports) + PAGE_SIZE - 1) // PAGE_SIZE,
+    )
     page = max(0, min(page, total_pages - 1))
 
     start = page * PAGE_SIZE
@@ -211,7 +233,7 @@ def build_summary_embed(world_data, server_choice, page, sort_mode):
             f"🛬 **Inbound flights:** {total_inbound:,}\n"
             f"🛫 **Outbound flights:** {total_outbound:,}\n"
             f"🎙️ **Active ATC facilities:** {total_atc:,}\n"
-            f"✈️ **Total inbound + outbound:** "
+            f"✈️ **Total movements:** "
             f"{total_inbound + total_outbound:,}"
         ),
         color=ORANGE,
@@ -224,15 +246,14 @@ def build_summary_embed(world_data, server_choice, page, sort_mode):
         for index, airport in enumerate(visible, start=start + 1):
             icao = airport_icao(airport)
             name = airport.get("airportName") or icao
-            total = traffic_total(airport)
             inbound = safe_int(airport.get("inboundFlightsCount"))
             outbound = safe_int(airport.get("outboundFlightsCount"))
             atc = len(airport.get("atcFacilities") or [])
 
             lines.append(
-                f"**{index}. {icao}** — {name[:65]}\n"
+                f"**{index}. {icao}** — {name[:60]}\n"
                 f"└ 🛬 {inbound} inbound · 🛫 {outbound} outbound"
-                f" · 🎙️ {atc} ATC · **{total} total**"
+                f" · 🎙️ {atc} ATC · **{inbound + outbound} total**"
             )
 
         embed.add_field(
@@ -242,11 +263,11 @@ def build_summary_embed(world_data, server_choice, page, sort_mode):
         )
 
     embed.add_field(
-        name="🔎 How to use",
+        name="🔎 Controls",
         value=(
-            "Choose an airport from the dropdown to see its traffic "
-            "and controller details. Use the buttons to browse pages "
-            "or refresh the live data."
+            "Select an airport to view traffic and ATC details.\n"
+            "Use the dropdowns and buttons below to sort, browse, "
+            "refresh, or switch servers."
         ),
         inline=False,
     )
@@ -254,26 +275,11 @@ def build_summary_embed(world_data, server_choice, page, sort_mode):
     embed.set_footer(
         text=(
             f"Akasa Air Virtual • Sort: {sort_mode} • "
-            "Data supplied by Infinite Flight Live API"
+            "Infinite Flight Live API"
         )
     )
 
     return embed, page, total_pages
-
-
-def sort_airports(world_data, sort_mode):
-    if sort_mode == "Inbound":
-        key = lambda a: safe_int(a.get("inboundFlightsCount"))
-    elif sort_mode == "Outbound":
-        key = lambda a: safe_int(a.get("outboundFlightsCount"))
-    elif sort_mode == "ATC":
-        key = lambda a: len(a.get("atcFacilities") or [])
-    elif sort_mode == "ICAO":
-        return sorted(world_data, key=airport_icao)
-    else:
-        key = traffic_total
-
-    return sorted(world_data, key=key, reverse=True)
 
 
 class WorldStatusView(discord.ui.View):
@@ -288,7 +294,7 @@ class WorldStatusView(discord.ui.View):
         sort_mode="Traffic",
         selected_icao=None,
     ):
-        super().__init__(timeout=240)
+        super().__init__(timeout=300)
 
         self.cog = cog
         self.owner_id = owner_id
@@ -302,10 +308,12 @@ class WorldStatusView(discord.ui.View):
         self.rebuild_controls()
 
     async def interaction_check(self, interaction):
+        # The message is public, but only its creator can control it.
+        # Everyone in the channel can still see the panel and its updates.
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message(
-                "This world monitor belongs to another user. "
-                "Run `/worldstatus` to open your own panel.",
+                "This panel is controlled by the person who opened it. "
+                "Run `/worldstatus` to create your own panel.",
                 ephemeral=True,
             )
             return False
@@ -315,8 +323,11 @@ class WorldStatusView(discord.ui.View):
     def rebuild_controls(self):
         self.clear_items()
 
-        # Airport selector: Discord allows at most 25 options.
-        airports = sort_airports(self.world_data, self.sort_mode)
+        airports = sort_airports(
+            self.world_data,
+            self.sort_mode,
+        )
+
         start = self.page * PAGE_SIZE
         visible = airports[start:start + PAGE_SIZE]
 
@@ -324,37 +335,10 @@ class WorldStatusView(discord.ui.View):
             self.add_item(AirportDropdown(self, visible))
 
         self.add_item(SortDropdown(self, self.sort_mode))
-
         self.add_item(PreviousPageButton(self))
         self.add_item(NextPageButton(self))
         self.add_item(RefreshButton(self))
         self.add_item(ServerButton(self))
-
-    async def show_summary(self, interaction, refresh=False):
-        if refresh:
-            result = await self.cog.fetch_world(self.session_id)
-
-            if result is None:
-                return await interaction.followup.send(
-                    "⚠️ Could not refresh world data. Please try again shortly.",
-                    ephemeral=True,
-                )
-
-            self.world_data = result
-
-        embed, self.page, total_pages = build_summary_embed(
-            self.world_data,
-            self.server_choice,
-            self.page,
-            self.sort_mode,
-        )
-
-        self.rebuild_controls()
-
-        await interaction.edit_original_response(
-            embed=embed,
-            view=self,
-        )
 
     async def show_airport(self, interaction, icao):
         airport = next(
@@ -367,17 +351,46 @@ class WorldStatusView(discord.ui.View):
 
         if airport is None:
             return await interaction.response.send_message(
-                "⚠️ This airport is no longer in the current world data. "
-                "Refresh and try again.",
+                "⚠️ Airport data not found. Refresh and try again.",
                 ephemeral=True,
             )
 
         self.selected_icao = icao
-        embed = build_airport_embed(airport, self.server_choice)
-
         self.rebuild_controls()
 
         await interaction.response.edit_message(
+            embed=build_airport_embed(
+                airport,
+                self.server_choice,
+            ),
+            view=self,
+        )
+
+    async def refresh_panel(self, interaction):
+        await interaction.response.defer()
+
+        result = await self.cog.fetch_world(self.session_id)
+
+        if result is None:
+            return await interaction.followup.send(
+                "⚠️ Refresh failed. The existing panel is unchanged.",
+                ephemeral=True,
+            )
+
+        self.world_data = result
+        self.selected_icao = None
+
+        embed, self.page, _ = build_summary_embed(
+            self.world_data,
+            self.server_choice,
+            self.page,
+            self.sort_mode,
+        )
+
+        self.rebuild_controls()
+
+        # Edits the original public message.
+        await interaction.edit_original_response(
             embed=embed,
             view=self,
         )
@@ -389,7 +402,7 @@ class WorldStatusView(discord.ui.View):
 
         if not session_id:
             return await interaction.followup.send(
-                f"⚠️ No active {server_choice} session was found.",
+                f"⚠️ No active {server_choice} session found.",
                 ephemeral=True,
             )
 
@@ -416,6 +429,7 @@ class WorldStatusView(discord.ui.View):
 
         self.rebuild_controls()
 
+        # Keep the main panel public when switching servers.
         await interaction.edit_original_response(
             embed=embed,
             view=self,
@@ -429,21 +443,19 @@ class WorldStatusView(discord.ui.View):
 class AirportDropdown(discord.ui.Select):
     def __init__(self, parent, airports):
         self.parent_view = parent
-
         options = []
 
         for airport in airports:
             icao = airport_icao(airport)
             name = (airport.get("airportName") or icao)[:80]
-            inbound = safe_int(airport.get("inboundFlightsCount"))
-            outbound = safe_int(airport.get("outboundFlightsCount"))
-            atc = len(airport.get("atcFacilities") or [])
 
             options.append(
                 discord.SelectOption(
                     label=f"{icao} — {name}"[:100],
                     description=(
-                        f"In {inbound} | Out {outbound} | ATC {atc}"
+                        f"In {safe_int(airport.get('inboundFlightsCount'))}"
+                        f" | Out {safe_int(airport.get('outboundFlightsCount'))}"
+                        f" | ATC {len(airport.get('atcFacilities') or [])}"
                     )[:100],
                     value=icao,
                     default=(icao == parent.selected_icao),
@@ -451,7 +463,7 @@ class AirportDropdown(discord.ui.Select):
             )
 
         super().__init__(
-            placeholder="🌍 Choose an airport on this page...",
+            placeholder="🌍 Choose an airport...",
             min_values=1,
             max_values=1,
             options=options,
@@ -526,7 +538,10 @@ class PreviousPageButton(discord.ui.Button):
         self.parent_view = parent
 
     async def callback(self, interaction):
-        self.parent_view.page = max(0, self.parent_view.page - 1)
+        self.parent_view.page = max(
+            0,
+            self.parent_view.page - 1,
+        )
         self.parent_view.selected_icao = None
 
         embed, self.parent_view.page, _ = build_summary_embed(
@@ -594,34 +609,7 @@ class RefreshButton(discord.ui.Button):
         self.parent_view = parent
 
     async def callback(self, interaction):
-        await interaction.response.defer()
-
-        result = await self.parent_view.cog.fetch_world(
-            self.parent_view.session_id
-        )
-
-        if result is None:
-            return await interaction.followup.send(
-                "⚠️ Refresh failed. The existing panel is unchanged.",
-                ephemeral=True,
-            )
-
-        self.parent_view.world_data = result
-        self.parent_view.selected_icao = None
-
-        embed, self.parent_view.page, _ = build_summary_embed(
-            self.parent_view.world_data,
-            self.parent_view.server_choice,
-            self.parent_view.page,
-            self.parent_view.sort_mode,
-        )
-
-        self.parent_view.rebuild_controls()
-
-        await interaction.edit_original_response(
-            embed=embed,
-            view=self.parent_view,
-        )
+        await self.parent_view.refresh_panel(interaction)
 
 
 class ServerButton(discord.ui.Button):
@@ -635,11 +623,10 @@ class ServerButton(discord.ui.Button):
         self.parent_view = parent
 
     async def callback(self, interaction):
-        view = ServerChoiceView(self.parent_view)
+        # Public server selection: no ephemeral response.
         await interaction.response.send_message(
-            "Choose the Infinite Flight server:",
-            view=view,
-            ephemeral=True,
+            "🌐 Choose the server for this public world monitor:",
+            view=ServerChoiceView(self.parent_view),
         )
 
 
@@ -652,7 +639,7 @@ class ServerChoiceView(discord.ui.View):
     async def interaction_check(self, interaction):
         if interaction.user.id != self.parent_view.owner_id:
             await interaction.response.send_message(
-                "Only the owner of this panel can change its server.",
+                "Only the panel owner can change its server.",
                 ephemeral=True,
             )
             return False
@@ -686,6 +673,8 @@ class ServerChoiceDropdown(discord.ui.Select):
         )
 
     async def callback(self, interaction):
+        # Update the original public monitor message.
+        # The selector itself is a public message too.
         await self.parent_view.change_server(
             interaction,
             self.values[0],
@@ -715,22 +704,23 @@ class WorldStatus(commands.Cog):
         if self.http is None or self.http.closed:
             return None
 
-        url = f"{BASE_URL}/{endpoint.lstrip('/')}"
-
         try:
             async with self.http.get(
-                url,
+                f"{BASE_URL}/{endpoint.lstrip('/')}",
                 params={"apikey": IF_API_KEY},
             ) as response:
                 if response.status != 200:
                     log.warning(
-                        "Infinite Flight API returned HTTP %s for %s",
+                        "Infinite Flight API HTTP %s for %s",
                         response.status,
                         endpoint,
                     )
                     return None
 
                 data = await response.json(content_type=None)
+
+                if not isinstance(data, dict):
+                    return None
 
                 if data.get("errorCode", 0) != 0:
                     log.warning(
@@ -743,23 +733,22 @@ class WorldStatus(commands.Cog):
                 return data.get("result")
 
         except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
-            log.warning("Infinite Flight API request failed: %s", exc)
+            log.warning("Infinite Flight request failed: %s", exc)
             return None
 
     async def fetch_session_id(self, server_choice):
         sessions = await self.api_get("sessions")
 
-        if not sessions:
+        if not isinstance(sessions, list):
             return None
 
         desired_type = WORLD_TYPES[server_choice]
 
-        # Use the documented WorldType enum, not the server name.
         for session in sessions:
             if session.get("worldType") == desired_type:
                 return session.get("id")
 
-        # Compatibility fallback for responses without worldType.
+        # Fallback for API responses missing worldType.
         for session in sessions:
             if server_choice.lower() in (
                 session.get("name") or ""
@@ -773,51 +762,42 @@ class WorldStatus(commands.Cog):
             f"sessions/{session_id}/world"
         )
 
-        if not isinstance(result, list):
-            return None
-
-        return result
+        return result if isinstance(result, list) else None
 
     @app_commands.command(
         name="worldstatus",
-        description="View live Infinite Flight traffic and ATC status",
+        description="View public Infinite Flight traffic and ATC status",
     )
     @app_commands.guild_only()
     async def worldstatus(self, interaction: discord.Interaction):
         if not IF_API_KEY:
             return await interaction.response.send_message(
-                "⚠️ The Infinite Flight API key is not configured. "
+                "⚠️ Infinite Flight API key is not configured. "
                 "Set `IF_API_KEY` in Railway Variables.",
                 ephemeral=True,
             )
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        # PUBLIC initial response: do not defer ephemerally.
+        await interaction.response.defer(thinking=True)
 
         server_choice = "Expert"
-
         session_id = await self.fetch_session_id(server_choice)
 
         if not session_id:
             return await interaction.followup.send(
-                "⚠️ No active Expert session was found, or the API "
-                "could not be reached.",
-                ephemeral=True,
+                "⚠️ No active Expert session found, or the API is unavailable.",
             )
 
         world_data = await self.fetch_world(session_id)
 
         if world_data is None:
             return await interaction.followup.send(
-                "⚠️ Failed to fetch Infinite Flight world data. "
-                "Please try again shortly.",
-                ephemeral=True,
+                "⚠️ Failed to fetch Infinite Flight world data. Try again later.",
             )
 
         if not world_data:
             return await interaction.followup.send(
-                "🌍 No active airport status data was returned "
-                "for the Expert server.",
-                ephemeral=True,
+                "🌍 No active airport data was returned for Expert.",
             )
 
         view = WorldStatusView(
@@ -835,10 +815,11 @@ class WorldStatus(commands.Cog):
             "Traffic",
         )
 
+        # PUBLIC follow-up: visible to everyone in the channel.
         await interaction.followup.send(
             embed=embed,
             view=view,
-            ephemeral=True,
+            ephemeral=False,
         )
 
 
